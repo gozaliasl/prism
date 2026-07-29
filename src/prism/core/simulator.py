@@ -3209,7 +3209,26 @@ def sample_real_field_galaxies_for_mock(field_pop, n_max=8, rng=None, numpix=300
     
     return field_galaxies
 
-def get_realistic_jwst_color(morph_type, n_sersic, base_band='F150W', target_band='F150W', rng=None, redshift=0.5):
+
+def resolve_sed_type_from_morphology(morph_type, n_sersic, rng):
+    """Map a galaxy's morphology label + Sersic index to one empirical SED
+    class. Callers computing colors for the same galaxy across multiple
+    bands should call this once per galaxy and pass the result to every
+    per-band color call (via the ``sed_type`` argument of
+    ``get_realistic_jwst_color``/``get_realistic_jwst_color_from_transmission``),
+    so all bands share one physically self-consistent SED instead of an
+    independent random draw per band.
+    """
+    if morph_type in ['elliptical', 's0'] or n_sersic > 2.5:
+        return 'passive'
+    if morph_type in ['irregular', 'clumpy', 'starburst', 'primordial'] or n_sersic < 0.7:
+        return rng.choice(['star_forming', 'dusty_starburst'], p=[0.7, 0.3])
+    if morph_type in ['spiral', 'late_spiral', 'barred_spiral'] or (0.7 <= n_sersic < 2.0):
+        return 'star_forming'
+    return rng.choice(['star_forming', 'post_starburst'], p=[0.8, 0.2])
+
+
+def get_realistic_jwst_color(morph_type, n_sersic, base_band='F150W', target_band='F150W', rng=None, redshift=0.5, sed_type=None):
     """
     Get realistic JWST color (magnitude offset) based on galaxy morphology and empirical SED templates.
     Returns magnitude offset relative to base_band.
@@ -3220,27 +3239,29 @@ def get_realistic_jwst_color(morph_type, n_sersic, base_band='F150W', target_ban
     - Extinction (Calzetti law, E(B-V))
     - Dust emission (multi-temperature blackbodies, PAH features)
     - Spectral features (Balmer break, 4000 Å break, 1.6 μm stellar bump)
-    
+
     Falls back to empirical COSMOS-Web color offsets if templates unavailable.
+
+    sed_type : str, optional
+        If given, use this SED class directly instead of re-deriving it from
+        morph_type/n_sersic. Callers computing colors for the same galaxy in
+        multiple bands should resolve sed_type once and pass it consistently
+        here, so the same underlying SED (not an independent per-band draw)
+        sets every band's flux -- required for physically self-consistent
+        multi-band colors.
     """
     if rng is None:
         rng = np.random.default_rng()
-    
+
     if base_band == target_band:
         return 0.0
-    
+
     # Use empirical SED templates if available
     if EMPIRICAL_SED_AVAILABLE:
-        # Map morphology to SED type
-        if morph_type in ['elliptical', 's0'] or n_sersic > 2.5:
-            sed_type = 'passive'
-        elif morph_type in ['irregular', 'clumpy', 'starburst', 'primordial'] or n_sersic < 0.7:
-            sed_type = rng.choice(['star_forming', 'dusty_starburst'], p=[0.7, 0.3])
-        elif morph_type in ['spiral', 'late_spiral', 'barred_spiral'] or (0.7 <= n_sersic < 2.0):
-            sed_type = 'star_forming'
-        else:
-            sed_type = rng.choice(['star_forming', 'post_starburst'], p=[0.8, 0.2])
-        
+        # Map morphology to SED type (unless the caller already resolved one)
+        if sed_type is None:
+            sed_type = resolve_sed_type_from_morphology(morph_type, n_sersic, rng)
+
         # Get filter wavelengths
         wave_base = JWST_FILTERS.get(base_band, 1.5)
         wave_target = JWST_FILTERS.get(target_band, 1.5)
@@ -3332,21 +3353,22 @@ def _color_from_multi_telescope_transmission(
     return float(color + rng.normal(0, 0.02))
 
 
-def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float, 
-                                                base_band: str = 'F150W', 
+def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float,
+                                                base_band: str = 'F150W',
                                                 target_band: str = 'F150W',
-                                                redshift: float = 0.5, rng=None) -> float:
+                                                redshift: float = 0.5, rng=None,
+                                                sed_type: str = None) -> float:
     """
     Calculate realistic JWST color using filter transmission curves and SED convolution.
-    
+
     This function provides more accurate colors by:
     1. Convolving galaxy SEDs with realistic filter transmission curves
     2. Accounting for proper K-corrections including filter shape effects
     3. Including filter-specific noise characteristics
-    
+
     Uses empirical SED templates when available to generate realistic galaxy spectra,
     then convolves with JWST filter transmission curves to compute magnitudes.
-    
+
     Parameters:
     -----------
     morph_type : str
@@ -3361,7 +3383,13 @@ def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float,
         Galaxy redshift
     rng : np.random.Generator
         Random number generator
-    
+    sed_type : str, optional
+        If given, use this SED class directly instead of re-deriving it from
+        morph_type/n_sersic. Callers computing colors for the same galaxy in
+        multiple bands should resolve sed_type once and pass it consistently
+        here, so the same underlying SED (not an independent per-band draw)
+        sets every band's flux.
+
     Returns:
     --------
     color : float
@@ -3369,35 +3397,28 @@ def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float,
     """
     if rng is None:
         rng = np.random.default_rng()
-    
+
     if base_band == target_band:
         return 0.0
-    
+
     base_upper = base_band.upper()
     target_upper = target_band.upper()
     use_jwst = _is_jwst_nircam_band(base_upper) and _is_jwst_nircam_band(target_upper)
-    
+
     # Use transmission-based calculation if available
     if not FILTER_TRANSMISSION_AVAILABLE and use_jwst:
         # Fall back to original method if transmission system not available
-        return get_realistic_jwst_color(morph_type, n_sersic, base_band, 
-                                       target_band, rng, redshift)
-    
+        return get_realistic_jwst_color(morph_type, n_sersic, base_band,
+                                       target_band, rng, redshift, sed_type=sed_type)
+
     if not MULTI_TELESCOPE_AVAILABLE and not use_jwst:
         return get_realistic_jwst_color(morph_type, n_sersic, base_band,
-                                       target_band, rng, redshift)
-    
-    # Generate SED based on morphology
+                                       target_band, rng, redshift, sed_type=sed_type)
+
+    # Generate SED based on morphology (unless the caller already resolved one)
     if EMPIRICAL_SED_AVAILABLE:
-        # Map morphology to SED type
-        if morph_type in ['elliptical', 's0'] or n_sersic > 2.5:
-            sed_type = 'passive'
-        elif morph_type in ['irregular', 'clumpy', 'starburst', 'primordial'] or n_sersic < 0.7:
-            sed_type = rng.choice(['star_forming', 'dusty_starburst'], p=[0.7, 0.3])
-        elif morph_type in ['spiral', 'late_spiral', 'barred_spiral'] or (0.7 <= n_sersic < 2.0):
-            sed_type = 'star_forming'
-        else:
-            sed_type = rng.choice(['star_forming', 'post_starburst'], p=[0.8, 0.2])
+        if sed_type is None:
+            sed_type = resolve_sed_type_from_morphology(morph_type, n_sersic, rng)
         
         # Generate SED spectrum covering JWST wavelength range
         wavelengths_um = np.linspace(0.3, 5.0, 200)  # Microns
@@ -7566,6 +7587,11 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
     _multicomponent_nl = _morph_cfg_nl.get('multicomponent_enabled', False)
     central_fragments = []
     for i, comp in enumerate(central_components):
+        # Resolve one SED class per component here (not per band below), so
+        # every band's color for this component is driven by the same
+        # underlying SED rather than an independent per-band draw.
+        comp['_sed_type_resolved'] = resolve_sed_type_from_morphology(
+            comp.get('morph_type', 'spiral'), comp['n_sersic'], rng)
         if _multicomponent_nl and 'hard_negative_profile' not in comp:
             base_params = {k: comp[k] for k in ('center_x', 'center_y', 'R_sersic', 'n_sersic', 'e1', 'e2')}
             seed = int(abs(hash((str(mode), i, 'central_morph'))) % (2**32))
@@ -7611,7 +7637,8 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
                                                         base_band='F150W',
                                                         target_band=b,
                                                         redshift=comp.get('redshift', 0.5),
-                                                        rng=rng)
+                                                        rng=rng,
+                                                        sed_type=comp.get('_sed_type_resolved'))
                 band_mag = float(np.clip(base_mag + color_offset, 18.0, 28.0))
 
                 if i == 0 and b == 'F115W':  # Debug first galaxy colors
@@ -8722,10 +8749,14 @@ def read_combined_cosmos_catalogs(structural_path, analysis_path=None):
     ref_band = UPPER_BANDS[0] if UPPER_BANDS else 'F150W'
 
     def _per_band_colors(morph_type, n_sersic, redshift):
+        # Resolve one SED class for this galaxy, then reuse it for every
+        # band below -- an independent per-band draw would let the same
+        # galaxy's flux ratios reflect different SEDs in different filters.
+        sed_type = resolve_sed_type_from_morphology(morph_type, n_sersic, sed_rng)
         return {
             band: get_realistic_jwst_color_from_transmission(
                 morph_type, n_sersic, base_band=ref_band, target_band=band.upper(),
-                redshift=redshift, rng=sed_rng)
+                redshift=redshift, rng=sed_rng, sed_type=sed_type)
             for band in LOWER_BANDS
         }
 
