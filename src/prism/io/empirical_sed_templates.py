@@ -179,17 +179,22 @@ def planck_function_safe(wavelengths, temperature):
     return flux
 
 
-def generate_empirical_sed(sed_type, wavelengths):
+def generate_empirical_sed(sed_type, wavelengths, rng=None):
     """
     Generate empirical SED template
-    
+
     Parameters:
     -----------
     sed_type : str
         One of: 'star_forming', 'passive', 'post_starburst', 'dusty_starburst'
     wavelengths : array
         Wavelengths in microns
-    
+    rng : np.random.Generator, optional
+        If given, the post-starburst class draws its dust attenuation from
+        E(B-V) ~ U(0.3, 0.8) (observed range for A+K-star-dominated
+        post-starburst galaxies) instead of the fixed default. Other classes
+        are unaffected by rng for now.
+
     Returns:
     --------
     flux : array
@@ -241,15 +246,22 @@ def generate_empirical_sed(sed_type, wavelengths):
         stellar_young = stellar_continuum_BC03(wave, age_gyr=0.5, tau_gyr=0.05)
         stellar_old = stellar_continuum_BC03(wave, age_gyr=1.0, tau_gyr=0.1)
         stellar = 0.3 * stellar_young + 0.7 * stellar_old
-        
-        # Moderate extinction
-        extinct = calzetti_extinction(wave, E_BV=0.08)
+
+        # Dust attenuation: observed post-starburst galaxies span a wide
+        # range from nearly dust-free to heavily obscured. Sample per-galaxy
+        # when an rng is supplied; otherwise fall back to the dust-poor
+        # (A+K-star, minimal residual gas) default.
+        if rng is not None:
+            e_bv_post_starburst = float(rng.uniform(0.3, 0.8))
+        else:
+            e_bv_post_starburst = 0.08
+        extinct = calzetti_extinction(wave, E_BV=e_bv_post_starburst)
         stellar *= extinct
-        
+
         # Weak residual IR emission
         T_warm = 35  # K
-        dust = np.where(wave > 30.0, 
-                       0.08 * planck_function_safe(wave, T_warm), 
+        dust = np.where(wave > 30.0,
+                       0.08 * planck_function_safe(wave, T_warm),
                        0)
         
         flux = stellar + dust

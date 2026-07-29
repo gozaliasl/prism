@@ -3401,7 +3401,7 @@ def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float,
         
         # Generate SED spectrum covering JWST wavelength range
         wavelengths_um = np.linspace(0.3, 5.0, 200)  # Microns
-        sed_spectrum = generate_empirical_sed(sed_type, wavelengths_um)
+        sed_spectrum = generate_empirical_sed(sed_type, wavelengths_um, rng=rng)
         
         # Convolve with filter transmission to get magnitudes
         try:
