@@ -1,0 +1,3 @@
+Batch,Total Lenses,Total Non-Lenses,Total Samples,Mean Lens Redshift,Mean Einstein Radius (arcsec),Mean Source Redshift,Mean Lens Radius (arcsec),Mean Source Radius (arcsec)
+EmpiricalLatest,434,5000,5434,1.055,0.659,3.595,0.419,0.089
+AblationLatest,434,5000,5434,1.063,0.659,3.548,0.419,0.084

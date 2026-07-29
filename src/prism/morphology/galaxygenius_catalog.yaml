@@ -1,0 +1,158 @@
+# GalaxyGenius fiducial morphology showcase (Zhou et al. 2025, A&A 700, A120;
+# arXiv:2506.15060).  Panels are cropped from published JWST NIRCam mock images
+# (Figure 6 for TNG; Figure 10b for EAGLE) unless noted.
+#
+# band_col indices match the six NIRCam filters in the combined figures:
+#   0=F070W, 1=F150W, 2=F200W, 3=F182M, 4=F356W, 5=F444W
+
+defaults:
+  band: F150W
+  survey: JWST
+  t_exp_s: 600
+  n_exp: 1
+  pixel_scale_arcsec: 0.031
+
+morphologies:
+  elliptical:
+    label: Elliptical
+    asset: tng_jwst_combined
+    row: 0
+    band_col: 1
+    subhalo_id: 0
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Paper fiducial ETG (Table 2)"
+
+  s0:
+    label: S0 / Early-type
+    asset: tng_jwst_combined
+    row: 0
+    band_col: 4
+    band: F356W
+    subhalo_id: 0
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Same subhalo 0; F356W emphasizes smooth old stellar light"
+
+  spiral:
+    label: Spiral
+    asset: tng_jwst_combined
+    row: 2
+    band_col: 1
+    subhalo_id: 253881
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    view: face-on
+    notes: "Paper fiducial spiral (Table 2)"
+
+  late_spiral:
+    label: Late Spiral (Sc/Sd)
+    asset: tng_jwst_combined
+    row: 2
+    band_col: 0
+    band: F070W
+    subhalo_id: 253881
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    view: face-on
+    notes: "Bluer band resolves arm knots (Figure 6)"
+
+  edge_on:
+    label: Edge-on Disk
+    asset: tng_jwst_combined
+    row: 3
+    band_col: 1
+    subhalo_id: 253881
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    view: edge-on
+    notes: "Same subhalo 253881, edge-on viewing angle"
+
+  barred_spiral:
+    label: Barred Spiral
+    asset: tng_jwst_combined
+    row: 2
+    band_col: 3
+    band: F182M
+    subhalo_id: 253881
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    view: face-on
+    notes: "Central bar visible in medium-band F182M"
+
+  ring:
+    label: Ring Galaxy
+    asset: tng_jwst_combined
+    row: 2
+    band_col: 4
+    band: F356W
+    subhalo_id: 253881
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    view: face-on
+    notes: "Proxy: outer spiral arms in F356W (no dedicated ring subhalo in paper)"
+
+  irregular:
+    label: Irregular
+    asset: tng_jwst_combined
+    row: 1
+    band_col: 1
+    subhalo_id: 31
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Paper fiducial irregular / high-SFR (Table 2)"
+
+  primordial:
+    label: Primordial
+    asset: tng_jwst_combined
+    row: 1
+    band_col: 0
+    band: F070W
+    subhalo_id: 31
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Clumpy young stellar light in F070W"
+
+  clumpy:
+    label: Clumpy
+    asset: tng_jwst_combined
+    row: 1
+    band_col: 2
+    band: F200W
+    subhalo_id: 31
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Patchy star-forming regions in subhalo 31"
+
+  starburst:
+    label: Starburst
+    asset: tng_jwst_combined
+    row: 1
+    band_col: 5
+    band: F444W
+    subhalo_id: 31
+    simulation: TNG100
+    snapshot: 94
+    redshift: 0.06
+    notes: "Strong emission lines + young stars (MAPPINGS-III, Table 2)"
+
+  post_merger:
+    label: Post-Merger
+    asset: eagle_jwst_combined
+    row: 1
+    band_col: 1
+    subhalo_id: 21109761
+    simulation: EAGLE
+    snapshot: 27
+    redshift: 0.101
+    notes: "EAGLE spiral with companion sources in cutout (Figure 10b)"

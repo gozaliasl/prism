@@ -1,0 +1,8 @@
+morph_type=ring
+label=Ring Galaxy
+n_sersic=2.0
+q=0.85
+R_eff=1.3
+bulge:Sersic(n=4.0,Re=0.18")
+disk:Exp(h=1.17")
+ring:Sersic(n=0.5,Re=1.57")

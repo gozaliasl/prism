@@ -1,0 +1,6 @@
+morph_type=s0
+label=S0 / Early-type
+n_sersic=2.8
+q=0.85
+R_eff=0.6
+bulge:Sersic(n=4.0,Re=0.13")

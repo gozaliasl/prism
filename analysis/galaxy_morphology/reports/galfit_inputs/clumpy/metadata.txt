@@ -1,0 +1,6 @@
+morph_type=clumpy
+label=Clumpy
+n_sersic=0.5
+q=0.35
+R_eff=1.1
+disk:Sersic(n=0.7,Re=1.10")

@@ -1,0 +1,265 @@
+# Euclid 1′ paper hero — match outputs/euclid_final/final_B_fullmaps.jpg aesthetic
+#
+# Key differences from the failed gallery:
+#   • LARGE Einstein radii (θ_E ~ 4–9″) for a visible ring (final_B had ~7.6″)
+#   • FEW bright massive companions (~12–18), not ~40 faint dots
+#   • Q1 PSF only — do NOT resample θ_E from compact Q1 discovery sample
+#   • Smooth elliptical BGG + visible group satellites
+#
+# Run:
+#   python scripts/local/run_paper_finalB_style.py
+
+n_lenses: 12
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 18
+
+telescope: euclid
+
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  # Keep PSF realism, but do NOT pull compact Q1 θ_E / photometry
+  use_population_priors: false
+  use_q1_photometry: false
+  use_q1_shear: false
+  resample_theta_E: false
+
+multi_resolution:
+  enabled: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+redshifts:
+  lens_min: 0.30
+  lens_max: 0.55
+  source_min: 1.2
+  source_max: 2.5
+  enforce_source_behind_lens: true
+  min_delta_z: 0.6
+
+mass:
+  lens_mass_min: 11.5
+  lens_mass_max: 12.5
+  use_mass_theta_E_correlation: true
+
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  min_magnification: 8.0
+  max_magnification: 40.0
+  # Allow final_B-scale rings (θ_E ≈ 7.6″); default hard max elsewhere is 5″
+  theta_E_hard_max: 10.0
+  # Thin arcs; source ≪ Einstein radius so BGG light dominates the core
+  source_fraction_mean: 0.10
+  source_fraction_sigma: 0.12
+  source_fraction_min: 0.04
+  source_fraction_max: 0.20
+  lens_radius_min: 1.5
+  lens_radius_max: 4.0
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.40
+
+field:
+  # Only bright galaxies (mag ≲ 21.5) → ~10–18 objects over 1′
+  density_mag_limit: 21.5
+  avoid_center_arcsec: 2.0
+  min_pair_separation_arcsec: 0.8
+  max_fraction_of_half_size: 0.90
+  size_max_arcsec: 2.5
+  size_max_fraction_of_lens: 0.85
+  min_count: 0
+
+photometry:
+  # Bright massive BGG dominates the image (final_B style); arcs visible but secondary
+  lens_mag_min: 16.8
+  lens_mag_max: 18.6
+  # Base apparent mag before redshift term — must be bright enough that
+  # clip-to-max does not pin every lens at the faint ceiling.
+  lens_base_mag_zero: 17.6
+  lens_redshift_log_slope: 0.4
+  # Do not overwrite with faint COSMOS JWST catalog mags
+  use_catalog_lens_mags: false
+  source_mag_min: 20.5
+  source_mag_max: 23.5
+  # Source intrinsically much fainter; magnification still leaves arcs visible
+  min_source_fainter_than_lens_mag: 2.5
+  max_source_fainter_than_lens_mag: 4.5
+  visible_arc_mag_diff_max: 4.0
+  visible_arc_source_mag_max: 22.5
+  source_mag_diff_min: 2.5
+  source_mag_diff_max: 4.5
+  source_base_mag: 21.5
+  field_mag_limit: 22.0
+
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+  native_ring_merger_geometry: false
+  bt_fractions:
+    elliptical: 0.96
+    s0: 0.90
+    spiral: 0.20
+  components:
+    bulge:
+      n_sersic: 4.0
+      r_frac: 0.28
+    disk:
+      n_sersic: 1.0
+      r_frac: 0.85
+
+lens_morphology:
+  force_morph_type: elliptical
+  min_lens_sersic: 4.0
+
+tng_mode:
+  enabled: true
+  sim_mode: tng_mixed
+  local_catalog_path: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet
+  local_catalog_path_tng50: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng50-1_local_catalog.parquet
+  logM_tol: 0.50
+  max_attempts: 30
+  require_local_particles: false
+  lens_sfr_class: quiescent
+  lens_environment: group
+  source_logM_default: 10.0
+  source_logM_scatter: 0.4
+  field_enabled: false
+  environment_drives_field_count: true
+  particle_morphology:
+    enabled: false
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.15
+  group:
+    fraction: 0.70
+  binary_sie_sie:
+    fraction: 0.15
+  binary_nfw_nfw:
+    fraction: 0.0
+  binary_shear_only:
+    fraction: 0.0
+
+environment:
+  types:
+    group:
+      fraction: 0.70
+      # Richness multiplier only — absolute count from COSMOS × FOV
+      galaxy_count_mean: 2.2
+      galaxy_count_std: 0.6
+      min_galaxies: 1
+      max_galaxies: 5
+      separation_mean: 3.0
+      avoid_factor: 1.2
+      max_radius_arcsec: 25.0
+      shear_min: 0.06
+      shear_max: 0.16
+    isolated_field:
+      fraction: 0.15
+      galaxy_count_mean: 1.8
+      galaxy_count_std: 0.5
+      min_galaxies: 1
+      max_galaxies: 4
+      separation_mean: 4.0
+      avoid_factor: 1.2
+      max_radius_arcsec: 26.0
+      shear_min: 0.04
+      shear_max: 0.12
+    galaxy_pair:
+      fraction: 0.15
+      galaxy_count_mean: 2.0
+      galaxy_count_std: 0.5
+      min_galaxies: 1
+      max_galaxies: 4
+      separation_mean: 3.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 25.0
+      shear_min: 0.05
+      shear_max: 0.14
+
+# FP for σ + Re (size–dispersion consistency); keep catalog θ_E for large rings
+fundamental_plane:
+  enabled: true
+  update_theta_E: false
+  catalog_theta_E_weight: 0.85
+
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  extended_image_fov_arcmin: 1.0
+  extended_lensing_fov_arcmin: 1.0
+  stacked_npy:
+    enabled: false
+  rgb:
+    # Clean black sky + re-insert ≥4σ field galaxies from the band data
+    band_style_stretch: false
+    field_overlay: true
+    field_overlay_snr: 3.5
+    noise_level: 0.20
+    sat_percent: 0.08
+    sigma_mult: 1.0
+    soft_clip: false
+    color_enhance: 1.25
+    arc_boost: 0.20
+    linked_stretch: true
+
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+
+telescope_configs:
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 600
+    lens_population:
+      redshifts:
+        lens_min: 0.30
+        lens_max: 0.55
+        source_min: 1.2
+        source_max: 2.5
+        min_delta_z: 0.6
+      # Dramatic rings like final_B (θ_E ≈ 7.6″)
+      theta_E:
+        min: 3.5
+        max: 9.5
+        median: 6.5
+        log_scatter: 0.22
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

@@ -1,0 +1,769 @@
+# JWST Mock Lens Simulator Configuration
+
+# Simulation Parameters
+n_lenses: 20
+n_non_lenses: 20
+variations_per_base: 10
+n_field_max: 5
+
+# ML Training Configurations
+ml_training:
+  # Standard ML training batch (50k lenses + 50k non-lenses)
+  standard:
+    n_lenses: 50000
+    n_non_lenses: 50000
+    variations_per_base: 115  # 434 base lenses * 115 = 49,910 lenses
+    description: "Standard ML training dataset with empirical variations"
+  
+  # Large-scale training batch (100k lenses + 100k non-lenses)
+  large_scale:
+    n_lenses: 100000
+    n_non_lenses: 100000
+    variations_per_base: 230  # 434 base lenses * 230 = 99,820 lenses
+    description: "Large-scale ML training dataset for robust models"
+  
+  # Quick training batch (10k lenses + 10k non-lenses)
+  quick:
+    n_lenses: 10000
+    n_non_lenses: 10000
+    variations_per_base: 23   # 434 base lenses * 23 = 9,982 lenses
+    description: "Quick ML training dataset for testing"
+  
+  # Production batch (same as current workflow)
+  production:
+    n_lenses: 5000
+    n_non_lenses: 5000
+    variations_per_base: 12   # 434 base lenses * 12 = 5,208 lenses
+    description: "Production dataset for paper validation"
+
+# Image Parameters
+image_size: 300
+pixel_scale: 0.031  # JWST NIRCam pixel scale (arcsec/pixel)
+
+# Multi-Resolution Support (for resolution impact studies)
+# Leave multi_resolution disabled for standard operation
+# Enable for multi-resolution thesis/research projects
+multi_resolution:
+  enabled: false  # Set to true to generate same lens at multiple resolutions
+  scales:
+    - name: "ground_based"
+      pixel_scale: 0.2      # Ground-based astronomy (e.g., HST/ACS)
+      description: "Ground-based resolution"
+    - name: "roman"
+      pixel_scale: 0.11     # Nancy Grace Roman Space Telescope
+      description: "Roman Space Telescope resolution"
+    - name: "euclid"
+      pixel_scale: 0.1      # Euclid-like resolution
+      description: "Medium resolution (Euclid)"
+    - name: "jwst"
+      pixel_scale: 0.031    # JWST NIRCam resolution
+      description: "High resolution (JWST)"
+  # When enabled, generates all scales for each lens (4x storage/time)
+  # Output: outputs/[run_id]/resolution_[name]/ subdirectories
+
+# Galaxy Parameters
+sersic_range: [0.3, 6.0]
+magnitude_range: [18.0, 28.0]
+
+# Native multi-component (bulge/disk/bar/ring/post-merger) galaxy
+# morphology -- see src/galaxy_morphology/README.md. Disabled by default
+# until validated; when false, build_light_model() returns the original
+# single-SERSIC_ELLIPSE behavior unchanged.
+morphology:
+  multicomponent_enabled: false
+  # Role gates (only matter when multicomponent_enabled: true). Allows
+  # isolating the lens-light vs source-light effects of native
+  # multi-component models, e.g. for diagnosing detection-statistics
+  # regressions (max_sep_arcsec, n_components, quad+ fraction) that may be
+  # driven by the lensed source becoming multi-component.
+  apply_to_lens: true
+  apply_to_source: true
+  components:
+    bulge: {n_sersic: 4.0, r_frac: 0.25, q_boost: 0.3}
+    # r_frac_source extends the lensed source's disk component beyond the
+    # total Sersic radius (tuning iteration 4 / item23): the dominant lever
+    # for closing the max_sep_arcsec/n_components/quad+ gap vs single-
+    # component rendering (item16). 1.0 = no change (lens-side default).
+    disk:  {n_sersic: 1.0, r_frac: 1.0, r_frac_source: 1.15}
+    bar:   {n_sersic: 0.5, r_frac: 0.4, q: 0.25}
+    ring:  {n_sersic: 0.5, r_frac: 0.8}
+    bulge_secondary: {n_sersic: 4.0, r_frac: 0.6, offset_frac: [0.3, 0.8]}
+  # Reference-band (F150W) bulge/bar/ring-like flux fraction by morph type
+  # (tuning iteration 1 / item20 values -- 30% reduction from the original
+  # disk-hosting-type defaults, best color_F115W_F444W result)
+  bt_fractions:
+    elliptical: 0.9
+    s0: 0.85
+    spiral: 0.175
+    late_spiral: 0.14
+    barred_spiral: 0.14
+    edge_on: 0.21
+    ring: 0.14
+    post_merger: 0.175
+  # Per-band weight applied to bulge-like components relative to the disk.
+  # Tuning iteration 5 (item24) found that ANY non-neutral table here
+  # (item19-23's values all tried) hurts color_F115W_F444W relative to
+  # both real data and the pre-multicomponent baseline; neutral (all 1.0)
+  # restores color_F115W_F444W to ~item16's ratio (0.836 vs real). Left
+  # neutral; the structural disk.r_frac_source split still provides
+  # wavelength-dependent morphology via per-band B/T magnitudes.
+  band_weight_bulge_like: {F115W: 1.0, F150W: 1.0, F200W: 1.0, F277W: 1.0, F356W: 1.0, F444W: 1.0}
+  # Independent per-band weight applied to the disk component (added in
+  # tuning iteration 3). Left neutral (all 1.0, default) -- iteration 3
+  # (item22) showed a non-neutral disk weight made colors worse, not
+  # better. Kept as a config option for future tuning.
+  # band_weight_disk: {F115W: 1.0, F150W: 1.0, F200W: 1.0, F277W: 1.0, F356W: 1.0, F444W: 1.0}
+
+# Photometry (lens/source brightness control)
+photometry:
+  lens_mag_min: 18.0
+  lens_mag_max: 24.0
+  source_mag_min: 19
+  source_mag_max: 27.5
+  # Ensure source is fainter than lens by at least this many magnitudes
+  min_source_fainter_than_lens_mag: 1.2
+  # Stochastic source-lens mag difference when generating catalogs
+  source_mag_diff_min: 1.5
+  source_mag_diff_max: 5.0
+  # Generation scalings
+  lens_base_mag_zero: 21.0
+  lens_redshift_log_slope: 0.8
+  source_base_mag: 20.5
+
+# External catalogs
+catalogs:
+  galaxy_catalog: "/Volumes/exthd-prism/prism-data/catalogs/cosmos/galaxy_catalog.fits"
+
+# Geometry constraints (optimized for ML training & real lens finding)
+geometry:
+  # Lens galaxy size
+  lens_radius_min: 0.35         # arcsec (massive ellipticals)
+  lens_radius_max: 2.2          # arcsec
+  use_catalog_lens_radius: true # prefer catalog, enforce min/max
+  frame_radius_max_arcsec: 4.5  # hard cap inside 9\" cutout
+  min_environment_avoidance_arcsec: 0.35
+  lens_size_scaling:
+    r0_kpc: 5.2
+    alpha_mass: 0.75
+    beta_redshift: -1.2
+    reference_mass: 11.2
+    reference_z: 0.6
+    mix_catalog_weight: 0.35
+    kpc_min: 1.2
+    kpc_max: 18.0
+    log_scatter: 0.18
+  
+  # Source size (relative to Einstein radius for natural scaling)
+  source_fraction_mean: 0.12    # median(Rs/θ_E) - allows visible arcs
+  source_fraction_sigma: 0.45   # lognormal scatter for diversity
+  source_fraction_min: 0.02     # very compact (point-like)
+  source_fraction_max: 0.4      # extended (large arcs)
+  
+  # Physical realism: source intrinsically smaller than lens
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.6  # Rs_intrinsic ≤ 60% Rl (before lensing)
+  
+  # Magnification boost for ML diversity (arcs can appear larger after lensing)
+  allow_magnified_arcs_larger_than_lens: true
+
+# Redshift ranges (matched to observed strong lens statistics)
+redshifts:
+  lens_min: 0.3       # classical SLACS/BELLS to JWST high-z lenses
+  lens_max: 3.5       
+  source_min: 1.0     # star-forming galaxies to JWST deep field sources
+  source_max: 6.0
+  enforce_source_behind_lens: true  # zs > zl always
+  min_delta_z: 0.5    # typical observed gap (median ~1.2)
+
+# Multi-source lensed systems: additional background sources beyond the
+# primary lensed source, each independently placed inside the caustic and
+# rendered with a distance-ratio ("beta") rescaled deflection field for its
+# own redshift (single lens plane approximation, not full multi-plane ray
+# tracing). See generate the additional_sources block in
+# simulate_complete_lens_system_with_real_fields.
+multi_source:
+  enabled: false
+  n_sources_probs: [0.40, 0.30, 0.15, 0.10, 0.05]  # P(1,2,3,4,5 sources)
+  extra_source_z_offset_range: [0.3, 2.5]  # extra source z = primary source z + U(lo, hi)
+
+# Mass constraints (massive lens galaxies from paper)
+mass:
+  lens_mass_min: 10.0   # log10(M/M☉) - massive ellipticals
+  lens_mass_max: 12.0   # log10(M/M☉) - BCG/cD galaxies
+  use_mass_theta_E_correlation: true
+  # Empirical: θ_E ∝ M^0.5 at fixed z
+
+# Dark-matter subhalo perturbers (NFW), appended ON TOP OF the SIE(+shear)
+# macromodel -- NOT a replacement for it. SIE remains the realistic total
+# (stars+DM) mass description of the lens galaxy (standard choice for
+# galaxy-scale lenses, e.g. SLACS); NFW is the physically appropriate
+# profile for dark-matter-dominated substructure. These produce realistic
+# small-scale perturbations (flux-ratio anomalies, astrometric shifts,
+# convergence/shear structure) -- NOT dramatic visual arcs.
+# Disabled by default: validate on a small batch (visual + runtime checks)
+# before enabling for production runs, since each extra NFW deflector adds
+# ray-tracing cost (5-20 perturbers/system can matter at scale).
+subhalos:
+  enabled: false
+  count_range: [3, 12]             # number of NFW perturbers per lens system
+  mass_function_slope: 1.9         # dN/dm ~ m^-alpha (CDM-like subhalo mass function)
+  mass_range_log10_host: [-4.5, -2.0]   # subhalo mass range, log10(m_sub / M_host)
+  mass_fraction_of_host: 0.01      # total bound subhalo mass / host halo mass
+  concentration_relation: duffy2008  # c(M,z): Duffy+2008 NFW, Delta=200c, full sample
+  max_radius_einstein_units: 3.0   # perturbers placed within this many theta_E (uniform in projected area)
+  profile: NFW                     # NFW for v1; TNFW (tidally truncated) planned as later extension
+
+# Binary lens systems (two galaxies as primary deflectors)
+binary_lenses:
+  enabled: true                      # Enable binary lens systems
+  fraction: 0.35                     # 35% of lens systems are binaries (pair galaxies)
+  mass_profile_types:
+    sie_sie: 0.5                     # 50% of binaries use SIE+SIE (faster, simpler)
+    nfw_nfw: 0.5                     # 50% of binaries use NFW+NFW (more realistic)
+  mass_ratio:
+    min: 0.3                         # Minimum mass ratio M2/M1
+    max: 1.0                         # Maximum mass ratio (equal mass)
+    distribution: 'uniform'          # 'uniform' or 'power_law'
+  separation:
+    min_in_einstein_radii: 0.5       # Minimum separation in units of (θ_E1 + θ_E2)
+    max_in_einstein_radii: 2.0       # Maximum separation in units of (θ_E1 + θ_E2)
+    distribution: 'uniform'          # 'uniform' or 'log_uniform'
+  redshift_config:
+    same_redshift_fraction: 0.8      # 80% at same redshift (true pair)
+    max_delta_z: 0.3                 # Max redshift difference for line-of-sight pairs
+  orientation:
+    random_position_angle: true      # Random orientation of binary axis
+    correlated_ellipticities: true   # Correlated ellipticity orientations (physical pairs)
+
+# Lens system class distribution (PRISM classification)
+# Controls the mix of single field, group, and binary lenses
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.45                   # 45% single galaxy lenses
+    description: "Single field galaxy lens (SIE or NFW + optional shear)"
+  group:
+    fraction: 0.20                   # 20% group lenses (multiple components)
+    description: "Group lens with multiple different mass profile types"
+  binary_sie_sie:
+    fraction: 0.175                  # 17.5% binary SIE+SIE (half of binary 35%)
+    description: "Binary pair: two smooth isothermal spheres"
+  binary_nfw_nfw:
+    fraction: 0.175                  # 17.5% binary NFW+NFW (half of binary 35%)
+    description: "Binary pair: two NFW mass profiles"
+  binary_shear_only:
+    fraction: 0.0                    # 0% by default: SIE primary + two SHEAR components
+    description: "Binary pair: SIE primary plus a secondary modeled as pure external shear"
+  # Note: total fraction should sum to 1.0 (45 + 20 + 17.5 + 17.5 + 0 = 100%)
+
+# Mass–size relation selection for lenses
+mass_size:
+  lens_relation_mix:
+    cowls_fraction: 0.40   # Probability a lens uses COWLS redshift-binned relation
+    cwmgs_fraction: 0.60   # Probability a lens uses CWMGs redshift-binned relation
+  fallback_global:
+    slope: 0.387           # log10(Re/kpc) = slope * log10(M*) + intercept
+    intercept: -3.843
+    size_evolution_exponent: -0.2   # Re(z) ∝ (1+z)^{exp}
+
+# Environmental diversity (adapted for 9"×9" cutout - NOT full field)
+# Original COWLS values were for larger fields; scaled for 300×300 pixel cutout
+environment:
+  types:
+    isolated_field:
+      fraction: 0.45
+      galaxy_count_mean: 2.5  # fallback mean when min/max unavailable
+      galaxy_count_std: 1.2
+      min_galaxies: 0
+      max_galaxies: 3
+      poisson_lambda: 1.4
+      separation_mean: 2.5  # arcsec
+      avoid_factor: 1.25
+      max_radius_arcsec: 3.0
+      shear_min: 0.01
+      shear_max: 0.05
+    galaxy_pair:
+      fraction: 0.35
+      galaxy_count_mean: 3.0  # fallback mean when min/max unavailable
+      galaxy_count_std: 1.3
+      min_galaxies: 1
+      max_galaxies: 4
+      separation_mean: 1.8  # arcsec
+      avoid_factor: 1.1
+      max_radius_arcsec: 3.5
+      shear_min: 0.03
+      shear_max: 0.08
+    group:
+      fraction: 0.20
+      galaxy_count_mean: 4.5  # fallback mean when min/max unavailable
+      galaxy_count_std: 1.6
+      min_galaxies: 2
+      max_galaxies: 5
+      separation_mean: 1.2  # arcsec
+      avoid_factor: 1.0
+      max_radius_arcsec: 4.0
+      shear_min: 0.05
+      shear_max: 0.15
+
+# Field galaxy placement/brightness realism
+field:
+  expected_density_per_arcsec2: 1.5
+  avoid_center_arcsec: 0.3
+  min_pair_separation_arcsec: 0.08
+  max_fraction_of_half_size: 0.9
+  min_count: 1  # Minimum field galaxies (reduced to respect n_field_max)
+  # Size constraints to keep field galaxies smaller than lens
+  size_max_arcsec: 1.2  # Maximum field galaxy size
+  size_max_fraction_of_lens: 0.6  # Maximum as fraction of lens radius
+
+# GalaxyGenius/SKIRT stamps as INTERPOL light profiles for a subset of field
+# galaxies (see src/galaxygenius_stamps.py). Off by default.
+galaxygenius_stamps:
+  enabled: false
+  fraction: 0.3   # fraction of field galaxies per system to render as stamps
+  source_enabled: false        # render the lensed source as a stamp instead of Sersic
+  source_fraction: 0.3         # fraction of systems whose source is rendered as a stamp
+  source_size_scale_factor: 1.0   # multiplies the redshift-derived angular size (angular_size_for_redshift)
+  lens_enabled: false          # render the foreground lens galaxy's light as a stamp
+  lens_fraction: 0.3           # fraction of systems whose lens light is rendered as a stamp
+  lens_target_size_factor: 6.0 # stamp full width = this * lens R_sersic (arcsec)
+  field_target_size_factor: 4.0 # TNG-particle field galaxy: stamp full width = this * field R_sersic (arcsec)
+
+# TNG Mode (see src/tng_galaxy_selector.py): replace the Sersic/Fundamental-
+# Plane-derived effective radius and Sersic index for the lens and lensed
+# source with values from a physically matched IllustrisTNG (TNG100-1)
+# subhalo (half-mass radius for R_sersic; sSFR-based early/late-type bias
+# for n_sersic). Off by default; requires TNG_API_KEY in the environment.
+tng_mode:
+  enabled: false
+  # If this Parquet file exists (built by scripts/build_tng_local_catalog.py),
+  # all TNG lookups are served from it with zero network calls. If unset or
+  # missing, falls back to the live TNG100-1 API (slow/rate-limited).
+  local_catalog_path: "/Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet"
+  logM_tol: 0.3          # +/- dex tolerance around the target stellar mass
+  max_attempts: 10        # candidate subhalos to try before giving up
+  source_logM_default: 9.5  # mean log10(M*/Msun) for lensed-source TNG lookup
+  source_logM_scatter: 0.5  # Gaussian scatter (dex) around source_logM_default
+
+  # Field galaxies: for a random subset, override R_sersic/n_sersic from a
+  # TNG100-1 subhalo matched to the field galaxy's assigned redshift and a
+  # sampled stellar mass (no catalog mass exists for field galaxies). Kept
+  # small by default to limit API calls (each field galaxy is a lookup).
+  field_enabled: false
+  field_fraction: 0.3        # fraction of field galaxies given a TNG match
+  field_logM_default: 9.5    # mean log10(M*/Msun) for field-galaxy TNG lookup
+  field_logM_scatter: 0.6    # Gaussian scatter (dex) around field_logM_default
+
+  # Environment-driven companion generation: if true, the matched lens
+  # subhalo's FoF group environment (isolated/pair/group/rich_group, from
+  # tng_lens) overrides the field-galaxy count instead of the
+  # lens_class_distribution-based env_type.
+  environment_drives_field_count: false
+
+  # TNG particle-driven physical morphology (Phase 1): when enabled, the
+  # lens-light and/or lensed-source light profiles are built directly from
+  # the matched TNG subhalo's star/gas particle data (projected, colored by
+  # age/metallicity, dust-attenuated -- see
+  # galaxy_morphology/tng_particle_light.py) instead of the analytic Sersic
+  # multi-component model. Only applies when the matched subhalo has a
+  # locally-downloaded particle cutout (tng_galaxy_selector.local_particle_path);
+  # otherwise falls back to the Sersic-based morphology.
+  particle_morphology:
+    enabled: false
+    lens_enabled: true
+    lens_fraction: 1.0
+    source_enabled: true
+    source_fraction: 1.0
+    field_enabled: false
+    field_fraction: 1.0
+    companion_enabled: false
+    companion_fraction: 1.0
+    # Phase 9: for field galaxies with a TNG match but no local particle
+    # cutout, fall back to a conditional-VAE generated stamp
+    # (galaxy_morphology.generative) instead of Sersic. Requires a trained
+    # checkpoint at src/galaxy_morphology/generative/checkpoints/cvae.pt
+    # (see train.py); silently no-ops if absent.
+    generative_enabled: false
+
+# Catalog usage policy (prefer true catalog values)
+strict_catalog:
+  use_catalog_only:
+    lens: true        # prefer lens properties from catalog
+    source: true      # prefer source properties from catalog if provided
+    field: true       # prefer field galaxy properties from merged catalog
+  required_fields:
+    - lens_redshift
+    - theta_E
+  missing_policy: "synthesize"   # "skip" to drop rows missing required_fields
+  synthesize:
+    magnitudes: true
+    theta_E: true
+    geometry: true
+
+# JWST Observation Parameters
+# Default: 4-band JWST observation (medium wavelength coverage)
+# For thesis/research: Can select specific filters for targeted studies
+#
+# Available filters: F090W, F115W, F150W, F200W, F277W, F356W, F444W
+# Default bands (4-band): F115W, F150W, F277W, F444W
+bands: ["F115W", "F150W", "F277W", "F444W"]
+
+# Band Selection Presets (for different science cases)
+band_presets:
+  default:
+    filters: ["F115W", "F150W", "F277W", "F444W"]
+    description: "Standard 4-band JWST (NIRCam) - DEFAULT"
+  
+  thesis_multi_filter:
+    filters: ["F090W", "F150W", "F200W", "F356W", "F444W"]
+    description: "5-band for color/redshift impact studies (Aaron's thesis)"
+  
+  short_wavelength:
+    filters: ["F115W", "F150W"]
+    description: "Short wavelength only (high-z optimization)"
+  
+  long_wavelength:
+    filters: ["F277W", "F356W", "F444W"]
+    description: "Long wavelength only (dust/redshift penetration)"
+
+band_centers:
+  F070W: 0.70
+  F090W: 0.90
+  F115W: 1.15
+  F150W: 1.50
+  F200W: 2.00
+  F277W: 2.77
+  F356W: 3.56
+  F444W: 4.44
+
+exposure_time: 1028.0
+magnitude_zero_point: 28.09  # Standard JWST NIRCam AB magnitude zero point
+
+# Empirical JWST noise properties (from 435 real strong lens observations)
+# See: configs/jwst_empirical_noise.json for full distribution
+noise:
+  # Sampling method: how to use empirical noise from 435 real lenses
+  # - 'distribution': Sample randomly from observed distribution (MOST REALISTIC - recommended)
+  # - 'median': Use median values (less variation, for testing)
+  # - 'percentile': Sample by percentile (for systematic studies)
+  sampling_method: 'distribution'  # DEFAULT: use observed distribution
+  
+  # Median values (used as fallback or when sampling_method='median')
+  # Recalculated with standard JWST ZP=28.09 for consistency
+  #
+  # F070W, F090W, F200W, F356W: extrapolated/interpolated in log(wavelength)
+  # from the empirical F115W/F150W/F277W/F444W values above (no real
+  # empirical lens-sample statistics available for these bands).
+  F070W:
+    sky_brightness: 32.34
+    background_level: 1.79e-05
+    background_rms: 0.0417
+    read_noise: 0.0294
+  F090W:
+    sky_brightness: 31.19
+    background_level: 5.17e-05
+    background_rms: 0.0343
+    read_noise: 0.02416
+  F115W:
+    sky_brightness: 30.07        # mag/arcsec² (consistent with ZP=28.09)
+    background_level: 1.448e-04  # e-/s/pix (median of 435 lenses)
+    background_rms: 0.0283       # e-/s/pix (median)
+    read_noise: 0.01996          # e-/s/pix (median)
+  F150W:
+    sky_brightness: 28.86        # mag/arcsec² (consistent with ZP=28.09)
+    background_level: 4.446e-04  # e-/s/pix (median of 435 lenses)
+    background_rms: 0.0230       # e-/s/pix (median)
+    read_noise: 0.01623          # e-/s/pix (median)
+  F277W:
+    sky_brightness: 28.02        # mag/arcsec² (consistent with ZP=28.09)
+    background_level: 9.560e-04  # e-/s/pix (median of 435 lenses)
+    background_rms: 0.00849      # e-/s/pix (median)
+    read_noise: 0.00590          # e-/s/pix (median)
+  F356W:
+    sky_brightness: 28.03
+    background_level: 9.484e-04
+    background_rms: 0.00924
+    read_noise: 0.00644
+  F200W:
+    sky_brightness: 28.47
+    background_level: 6.36e-04
+    background_rms: 0.01438
+    read_noise: 0.01006
+  F444W:
+    sky_brightness: 28.04        # mag/arcsec² (consistent with ZP=28.09)
+    background_level: 9.400e-04  # e-/s/pix (median of 435 lenses)
+    background_rms: 0.01007      # e-/s/pix (median)
+    read_noise: 0.00704          # e-/s/pix (median)
+
+# Legacy parameters (for backward compatibility)
+read_noise: 12.0
+sky_brightness: 27.0
+
+# Output Settings
+output_dir: "outputs"
+save_npy: true
+save_jpg: true
+save_catalogs: true
+save_intermediate_images: false  # Save step-by-step images: lens only, lens+sources, sources only, field only, final
+
+# Output Storage Configuration
+output:
+  unified_storage: true  # Use unified .npz format (saves all products in single file per sample)
+  # When unified_storage is true:
+  #   - All 4-band images (final + intermediates) saved in single compressed .npz file
+  #   - Reduces file count by ~5-10x and storage by ~20-30% (compression)
+  #   - RGB jpg still saved separately for quick visualization
+  #   - Better for ML training pipelines (single file I/O per sample)
+  # When false (legacy):
+  #   - Separate .npy files for each image component
+  #   - More files but easier individual access
+  skip_empty_images: true  # Drop samples with near-zero flux or missing source signal
+  min_total_flux: 1.0e-7   # Threshold for final composite total flux
+  min_source_flux: 1.0e-8  # Threshold for sources_only or lens_sources total flux
+  save_intermediate_rgb_jpg: true  # Save intermediate RGB JPGs even in unified mode
+  stacked_npy:
+    enabled: true  # Save a single stacked .npy per sample (steps x 5 channels)
+    order: [lens_only, sources_only, lens_sources, field_only, final]
+  save_fits: false  # Save a multi-extension FITS file per sample (image cube,
+    # PSF, NOISE, SEGMENTATION, TRUTH_CATALOG extensions) to a `fits/`
+    # output subdirectory. See src/fits_export.py.
+
+# Quality Settings
+add_artifacts: true  # Add observational artifacts (cosmic rays, noise)
+add_noise: true      # Add realistic noise
+verify_output: true  # Verify output quality
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Telescope / Instrument Selection
+# ─────────────────────────────────────────────────────────────────────────────
+# Which telescope detector model to apply. Controls both the PSF properties
+# and the full detector-chain physics below.
+# Options: jwst | roman | euclid | subaru | lsst
+telescope: "jwst"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fundamental Plane + Faber-Jackson Consistency
+# ─────────────────────────────────────────────────────────────────────────────
+# Enforces physical self-consistency of lens galaxy parameters using:
+#   Faber-Jackson:      σ ∝ L^0.25   (Bernardi+2003, SDSS r-band)
+#   Fundamental Plane:  log Re = 1.49 log σ − 0.75 log Ie + c(z)
+#   Redshift evolution: Δc(z) = −0.30·z   (Singh, Yu & Seljak 2021, BOSS LOWZ/CMASS)
+#   Lensing bias:       δ log Re = −0.10 dex at fixed σ (Sonnenfeld 2023)
+#   θ_E blend:          60% catalog + 40% FP-SIS prediction
+fundamental_plane:
+  enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Physically-Realistic Detector Chain
+# ─────────────────────────────────────────────────────────────────────────────
+# Implements the full signal chain for the selected telescope:
+#   flux (e-/s) → IPC → charge diffusion → brighter-fatter → non-linearity
+#               → dark current → Poisson shot noise → read noise + 1/f noise
+#               → saturation clipping → PRNU/flat-field → persistence
+#               → gain/ADC quantization → output (e-/s)
+#
+# All parameters are tuned to measured values from instrument papers.
+# See src/detector_chain.py for the full parameter table.
+detector_chain:
+  enabled: true          # false → fall back to legacy lenstronomy noise model
+
+  # Fine-grained control: set any effect to false to disable it.
+  # Useful for ablation studies (e.g. what does IPC contribute to lens shape?).
+  effects:
+    ipc:               true   # Interpixel capacitance (HgCdTe: ~1.7%; CCDs: off)
+    charge_diffusion:  true   # Sub-pixel charge spreading (Gaussian kernel)
+    brighter_fatter:   true   # Flux-dependent PSF broadening
+    nonlinearity:      true   # Polynomial detector response curve
+    dark_current:      true   # Thermal electrons (e-/s, Poisson)
+    poisson_shot_noise: true  # True Poisson shot noise (replaces Gaussian approx)
+    read_noise:        true   # Per-frame read noise (Gaussian, correlated double sampling)
+    one_f_noise:       true   # Structured 1/f row/column banding pattern
+    saturation:        true   # Hard clipping at detector full-well
+    prnu:              true   # Pixel Response Non-Uniformity (fixed-pattern)
+    persistence:       false  # Charge trapping from previous bright exposure
+                              # (set true for time-delay multi-epoch runs)
+    gain_adc:          true   # Gain conversion + ADC integer quantization
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-telescope config overrides (used when telescope != "jwst")
+#
+# image_size motivation (same physical scene, telescope-native sampling):
+#
+#  Telescope  pix_scale  image_size  FOV          PSF FWHM  θ_E (px)  ring fills
+#  ---------  ---------  ----------  ----------   ---------  --------  ----------
+#  JWST       0.031"/px  300×300     9.3"×9.3"    2.1 px     96 px     32% of frame
+#  Roman      0.110"/px  128×128    14.1"×14.1"   1.3 px     27 px     21% of frame
+#  Euclid     0.100"/px  128×128    12.8"×12.8"   1.8 px     30 px     23% of frame
+#  Subaru     0.168"/px  128×128    21.5"×21.5"   3.9 px     18 px     14% of frame
+#  LSST       0.200"/px  128×128    25.6"×25.6"   3.5 px     15 px     12% of frame
+#
+# Rationale: the FOV grows with pixel scale so the lens system remains visible
+# and adequately sampled. Ground-based images show a wider field to give context
+# around the (lower-resolution) lens. Using the same 300px for all would give a
+# 60"×60" FOV for LSST where the arc system occupies only ~50 pixels — unusable.
+# ─────────────────────────────────────────────────────────────────────────────
+telescope_configs:
+  roman:
+    bands: ["ROMAN_F106", "ROMAN_F129", "ROMAN_F158", "ROMAN_F184"]
+    pixel_scale: 0.11
+    exposure_time: 146.0        # Single WFI exposure (4 dithers × 36.5 s)
+    magnitude_zero_point: 28.09 # Roman WFI AB zero point (similar to JWST)
+    image_size: 128             # 14.1"×14.1" FOV — lens fills ~21% of frame
+
+  euclid:
+    bands: ["EUCLID_VIS", "EUCLID_Y", "EUCLID_J", "EUCLID_H"]
+    pixel_scale: 0.10
+    exposure_time: 565.0        # VIS nominal per pointing
+    magnitude_zero_point: 25.58 # Euclid VIS AB zero point (10 nJy at 5σ in 565s)
+    image_size: 128             # 12.8"×12.8" FOV — lens fills ~23% of frame
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Euclid Q1 strong-lens population statistics
+    #
+    # Derived from the Euclid Quick Release 1 (Q1, 63 deg^2) strong-lens
+    # discovery papers:
+    #   - Euclid Collaboration: Walmsley et al. 2025 (arXiv:2503.15324)
+    #     -- ML discovery engine over ~1M Q1 cutouts; 250+247 grade A/B
+    #        candidates from the deep search; 75,000 grade A/B forecast
+    #        for the full Wide Survey from the top 1M ranked images.
+    #   - Euclid Collaboration: Rojas et al. 2025 (arXiv:2503.15325)
+    #     -- Spectroscopically pre-selected (sigma_v > 180 km/s) sample;
+    #        38 grade-A + 40 grade-B candidates; Tables 1-2 give measured
+    #        z_lens, sigma_v, and theta_E for ~50 modelled systems:
+    #        theta_E ~ 0.3"-2.4" (median ~1.0"), z_lens ~ 0.19-1.09
+    #        (most below ~1), sigma_v ~ 185-333 km/s (selection > 180 km/s,
+    #        SIE deflectors drawn uniformly in comoving volume 0 < z < 2,
+    #        Choi et al. 2007 velocity-dispersion function).
+    #   - Euclid Collaboration: Lines et al. 2025 (arXiv:2503.15326)
+    #     -- 497 galaxy-galaxy candidates (250 grade A) over 63 deg^2,
+    #        resolving systems with theta_E < 1" in large numbers for the
+    #        first time -- i.e. a substantial population of compact,
+    #        sub-arcsecond Einstein radii in addition to the ~1" typical
+    #        SLACS-like population.
+    #
+    # These override the global `redshifts`/`mass`/theta_E settings above
+    # ONLY when telescope == "euclid", so JWST/Roman/etc. runs are
+    # unaffected.
+    lens_population:
+      redshifts:
+        lens_min: 0.2          # ~5th percentile of Q1 modelled z_lens
+        lens_max: 1.1          # covers nearly all Q1 modelled z_lens (0.19-1.09)
+        source_min: 1.0        # background sources mostly at z>1 (Lyman-alpha emitters at z~2 confirmed)
+        source_max: 4.0
+        min_delta_z: 0.4
+      theta_E:
+        # Updated from Q1 modelling sample (322 systems, /Volumes/exthd-prism/prism-data/psf/euclid_q1/)
+        min: 0.45
+        max: 2.4
+        median: 0.88
+        log_scatter: 0.35
+      velocity_dispersion:
+        # Choi et al. 2007 velocity-dispersion function, sigma_v > 180 km/s
+        # selection cut applied in Rojas et al. 2025 (Fig. 1).
+        min: 180.0
+        max: 335.0
+
+      # ───────────────────────────────────────────────────────────────────
+      # Detection-completeness mixture
+      #
+      # The ranges above describe the population Euclid Q1 *detected*
+      # (Rojas+2025 Tables 1-2; Lines+2025). But the Q1 discovery pipeline
+      # is necessarily incomplete: compact (theta_E ~ 0.1"-0.3", below or
+      # near the VIS PSF/resolution limit), high-z_lens (z_l > 1.1, low
+      # contrast against a bright deflector), and low-sigma_v (<180 km/s,
+      # below the spectroscopic pre-selection cut of Rojas+2025) systems
+      # are systematically under-represented in the published candidate
+      # catalogues. A simulation set that only reproduces the *detected*
+      # distribution would therefore be biased toward "easy" lenses and
+      # could not be used to test or improve completeness itself.
+      #
+      # `detected_fraction` of systems are drawn from the Q1-detected
+      # theta_E/redshift distributions above; the remainder are drawn from
+      # the `extended_*` ranges below, which cover the systematically
+      # under-detected regimes while still respecting the global
+      # redshift/theta_E priors used for other telescopes.
+      detected_fraction: 0.7
+      extended_theta_E:
+        min: 0.05    # sub-resolution / marginally resolved Einstein radii
+        max: 2.4
+        median: 0.45
+        log_scatter: 0.6
+      extended_redshifts:
+        lens_min: 0.1
+        lens_max: 3.0    # high-z_lens systems poorly recovered by Q1 selection
+        source_min: 1.0
+        source_max: 6.0
+        min_delta_z: 0.3
+
+  subaru:
+    bands: ["SUBARU_G", "SUBARU_R", "SUBARU_I", "SUBARU_Z"]
+    pixel_scale: 0.168
+    exposure_time: 600.0        # Typical HSC deep survey visit
+    magnitude_zero_point: 27.90 # Subaru HSC r-band AB zero point (Miyazaki+2018)
+    image_size: 128             # 21.5"×21.5" FOV — seeing-limited, ring fills ~14%
+
+  lsst:
+    bands: ["LSST_G", "LSST_R", "LSST_I", "LSST_Z"]
+    pixel_scale: 0.200
+    exposure_time: 30.0         # Standard LSST single visit
+    magnitude_zero_point: 27.79 # Rubin r-band AB zero point (30s visit; Ivezić+2019)
+    image_size: 128             # 25.6"×25.6" FOV — seeing-limited, ring fills ~12%
+    # LSST co-add simulation: stack N visits to reach target depth
+    coadd_visits: 1             # Set >1 for co-add depth simulation
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Euclid Q1 integration (empirical PSF + population priors)
+# Active when telescope == "euclid" and enabled: true.
+# Data: /Volumes/exthd-prism/prism-data/psf/euclid_q1/ (335 PSF tiles, modelling CSVs, psf_catalog.csv)
+# ─────────────────────────────────────────────────────────────────────────────
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true       # load /Volumes/exthd-prism/prism-data/psf/euclid_q1/tiles/ (falls back to GalSim if missing)
+  use_population_priors: true   # resample θ_E, ellipticity, shear, Sersic from Q1 models
+  use_q1_photometry: true      # VIS/Y/J/H magnitudes from Q1 MGE modelling
+  use_q1_shear: true            # per-system shear from Q1 (else draw from shear_range)
+  resample_theta_E: true
+  shear_range:                  # fallback when use_q1_shear draws from catalog row
+    min: 0.02
+    max: 0.20
+
+# Artifact Settings (when add_artifacts: true)
+artifacts:
+  cosmic_rays: true     # Add cosmic ray artifacts
+  hot_pixels: true      # Add hot pixel artifacts  
+  saturation: true      # Add saturation artifacts
+  intensity: "moderate" # Artifact intensity: "light", "moderate", "heavy"
+
+# Time Delay Settings for Variable Sources (quasars, supernovae, AGN)
+time_delays:
+  enabled: true                    # Enable time delay simulations
+  fraction_variable_sources: 0.1  # Fraction of lens systems with variable sources (15% for production)
+  source_types:
+    quasar:
+      fraction: 0.60               # 60% of variable sources are quasars
+      variability_amplitude: 1.5   # Magnitude variability amplitude (increased for visibility)
+      variability_timescale: 50.0  # Days (fallback if enhanced models not used)
+      use_drw: true                 # Use DRW model from celerite2 if available
+      black_hole_mass: null         # log10(M_BH/M_sun), null for default (~8.5)
+    supernova:
+      fraction: 0.25               # 25% are supernovae
+      variability_amplitude: 2.0  # Supernovae have larger variations
+      variability_timescale: 18.0  # Days - realistic rise time for Type Ia (~15-20 days)
+      use_sncosmo: true            # Use sncosmo templates if available
+      sn_type: 'Ia'                # Type: 'Ia', 'Ib', 'Ic', 'II-P', 'II-L'
+    agn:
+      fraction: 0.15               # 15% are AGN
+      variability_amplitude: 1.2  # AGN have moderate variations
+      variability_timescale: 40.0  # Days (fallback if enhanced models not used)
+      use_drw: true                # Use DRW model from celerite2 if available
+      black_hole_mass: null        # log10(M_BH/M_sun), null for default (~7.5)
+  epochs:
+    min_epochs: 4                  # Fixed number of epochs per variable source
+    max_epochs: 4                   # Fixed number of epochs per variable source
+    time_range_days: 200            # Total time range for epochs (days)
+    random_epochs: false             # Use random epochs (if true) or optimized (if false)
+    optimize_epochs: true           # Optimize epoch selection to maximize source brightness/shape variation
+  catalog:
+    save_time_delay_metadata: true  # Save time delay info to catalog
+    include_light_curves: false     # Include full light curves (large files)

@@ -1,0 +1,284 @@
+# =============================================================================
+# Euclid Q1 selection-function production sample
+# =============================================================================
+# 20 000 lenses + 20 000 non-lenses
+# 96×96 @ 0.10″/pix (9.6″ FOV) — VIS native resolution
+# Bands: EUCLID_VIS, EUCLID_Y, EUCLID_J, EUCLID_H
+#
+# Realism stack (calibrated on Euclid Q1 modelling / discovery products):
+#   • Empirical Q1 PSF library (335 tiles, all 4 bands)
+#   • θ_E, ellipticity, shear, Sersic, VIS/Y/J/H mags from Q1 posteriors
+#   • Rojas+2025 spectroscopic redshift priors (not fixed lenstronomy z=0.5)
+#   • 70% Q1-detected population + 30% extended (compact / high-z) for SF
+#   • Hybrid morphology: multicomponent Sersic + selective TNG particles
+#   • Full Euclid detector chain + artifacts
+#
+# Output (set via CLI --output_dir):
+#   /Volumes/exthd-prism/euclid_q1_sf_prod_20k_96px/
+# =============================================================================
+
+n_lenses: 20000
+n_non_lenses: 20000
+# 434 COSMOS base lenses × 47 variations = 20 398, then truncated to n_lenses=20 000
+variations_per_base: 47
+n_field_max: 20
+
+image_size: 96
+pixel_scale: 0.10
+
+telescope: euclid
+
+# --- Euclid Q1 empirical integration ------------------------------------------
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true       # 335 field-specific VIS/Y/J/H kernels
+  use_population_priors: true   # θ_E, e, shear, lens Sersic from Q1 models
+  use_q1_photometry: true       # VIS/Y/J/H mags from Q1 MGE modelling
+  use_q1_shear: true            # per-system shear from Q1 (median |γ|≈0.12)
+  resample_theta_E: true
+  shear_range:                  # fallback draw range
+    min: 0.02
+    max: 0.20
+
+multi_resolution:
+  enabled: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+# --- Geometry: strong lenses spanning detectability (SF, not demo-only) ------
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  min_magnification: 2.0        # Q1 median μ≈2.6; allow weaker systems
+  max_magnification: 20.0
+  source_fraction_mean: 0.18
+  source_fraction_sigma: 0.40
+  lens_radius_min: 0.35
+  lens_radius_max: 1.8
+
+# Field galaxies: count = COSMOS-Web number density × FOV × env richness
+# (see field_galaxy_count_target). For 96×96 @ 0.10″ (0.0256 arcmin²):
+#   mag<26 → ~3.1 (isolated) / ~3.7 (pair) / ~5.6 (group) mean companions.
+# density_mag_limit=26 includes galaxies visible in Euclid VIS cutouts
+# even if below the formal Wide Survey detection threshold (~24.5).
+field:
+  density_mag_limit: 26.0
+  avoid_center_arcsec: 0.25
+  min_pair_separation_arcsec: 0.08
+  min_count: 0                 # allow empty fields for true isolates
+  size_max_arcsec: 1.2
+  size_max_fraction_of_lens: 0.6
+  max_fraction_of_half_size: 0.95
+
+# --- Photometry: Q1 MGE ranges (selection-function friendly) -----------------
+photometry:
+  lens_mag_min: 18.5            # Q1 modeled min
+  lens_mag_max: 23.5            # Q1 modeled max
+  source_mag_min: 20.0
+  source_mag_max: 27.0          # include faint / hard-to-detect sources
+  min_source_fainter_than_lens_mag: 1.0   # Q1 median Δ≈1.3
+  source_mag_diff_min: 0.5
+  source_mag_diff_max: 3.5
+  field_mag_limit: 26.0         # match field.density_mag_limit (visible companions)
+
+# --- Morphology: multicomponent Sersic (Q1 bulge n≈4.4) + TNG particles ------
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+  components:
+    bulge:
+      n_sersic: 4.4             # Q1 Sersic median (modeling_lens_sersic)
+      r_frac: 0.25
+      q_boost: 0.3
+    disk:
+      n_sersic: 1.0
+      r_frac: 1.0
+      r_frac_source: 1.15
+    bar:
+      n_sersic: 0.5
+      r_frac: 0.4
+      q: 0.25
+    ring:
+      n_sersic: 0.5
+      r_frac: 0.8
+    bulge_secondary:
+      n_sersic: 4.4
+      r_frac: 0.6
+      offset_frac: [0.3, 0.8]
+  bt_fractions:
+    elliptical: 0.9
+    s0: 0.85
+    spiral: 0.175
+    late_spiral: 0.14
+    barred_spiral: 0.14
+    edge_on: 0.21
+    ring: 0.14
+    post_merger: 0.175
+
+# Hybrid TNG: particle morphology when local cutouts exist; else Sersic
+tng_mode:
+  enabled: true
+  sim_mode: tng_mixed
+  local_catalog_path: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet
+  local_catalog_path_tng50: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng50-1_local_catalog.parquet
+  logM_tol: 0.5
+  max_attempts: 20
+  require_local_particles: false   # fall back to Sersic if no cutout
+  lens_sfr_class: quiescent        # ETG-like deflectors (Q1)
+  source_logM_default: 9.5
+  source_logM_scatter: 0.5
+  field_enabled: true
+  field_fraction: 0.25
+  field_override_structural: false
+  field_logM_default: 9.0
+  field_logM_scatter: 0.75
+  # TNG FoF class remaps richness, then COSMOS×FOV sets the absolute count
+  environment_drives_field_count: true
+  particle_morphology:
+    enabled: true
+    min_particles: 200
+    min_particles_field: 50
+    lens_enabled: true
+    lens_fraction: 0.80            # 80% TNG particles / 20% Sersic
+    source_enabled: true
+    source_fraction: 0.45          # 45% TNG / 55% Sersic sources
+    source_smooth_sigma: 1.0
+    field_enabled: true
+    field_fraction: 0.18
+    companion_enabled: true
+    companion_fraction: 0.5
+    generative_enabled: false
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+# Lens classes: match Q1 mix (mostly single; ~group archive fraction)
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.55
+  group:
+    fraction: 0.15
+  binary_sie_sie:
+    fraction: 0.15
+  binary_nfw_nfw:
+    fraction: 0.15
+  binary_shear_only:
+    fraction: 0.0
+
+# galaxy_count_mean values are richness *weights* (relative to 2.5), not
+# absolute counts — absolute N comes from COSMOS density × FOV.
+environment:
+  types:
+    isolated_field:
+      fraction: 0.45
+      galaxy_count_mean: 2.5
+      galaxy_count_std: 1.2
+      separation_mean: 2.5
+      shear_min: 0.02
+      shear_max: 0.08
+    galaxy_pair:
+      fraction: 0.35
+      galaxy_count_mean: 3.0
+      galaxy_count_std: 1.3
+      separation_mean: 1.8
+      shear_min: 0.03
+      shear_max: 0.12
+    group:
+      fraction: 0.20
+      galaxy_count_mean: 4.5
+      galaxy_count_std: 1.4
+      separation_mean: 1.2
+      shear_min: 0.04
+      shear_max: 0.15
+
+fundamental_plane:
+  enabled: true
+
+# --- Instrument / population (Q1-calibrated) ---------------------------------
+telescope_configs:
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 96
+    lens_population:
+      redshifts:
+        lens_min: 0.2
+        lens_max: 1.1
+        source_min: 1.0
+        source_max: 4.0
+        min_delta_z: 0.4
+      theta_E:
+        min: 0.45
+        max: 2.4
+        median: 0.88
+        log_scatter: 0.35
+      velocity_dispersion:
+        min: 180.0
+        max: 335.0
+      # Selection-function mixture: 70% Q1-like detected + 30% hard/extended
+      detected_fraction: 0.7
+      extended_theta_E:
+        min: 0.05
+        max: 2.4
+        median: 0.45
+        log_scatter: 0.6
+      extended_redshifts:
+        lens_min: 0.1
+        lens_max: 3.0
+        source_min: 1.0
+        source_max: 6.0
+        min_delta_z: 0.3
+
+# --- Detector chain (Euclid VIS/NISP physics) --------------------------------
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+
+# --- Outputs -----------------------------------------------------------------
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  stacked_npy:
+    enabled: true
+    order:
+    - lens_only
+    - sources_only
+    - lens_sources
+    - field_only
+    - final
+
+output_dir: /Volumes/exthd-prism/euclid_q1_sf_prod_20k_96px
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

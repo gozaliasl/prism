@@ -1,0 +1,186 @@
+# Euclid twin of COSJ100011+023531 (same physics, Euclid bands + 1′ FOV option)
+# Native Euclid sampling of the same binary+arc morphology.
+#
+# Run via: python scripts/local/run_real_lens_twin.py --telescope euclid
+
+n_lenses: 6
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 40
+
+telescope: euclid
+
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  use_population_priors: false
+  use_q1_photometry: false
+  use_q1_shear: false
+  resample_theta_E: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+redshifts:
+  lens_min: 0.65
+  lens_max: 0.75
+  source_min: 1.8
+  source_max: 2.8
+  enforce_source_behind_lens: true
+  min_delta_z: 0.8
+
+mass:
+  lens_mass_min: 9.6
+  lens_mass_max: 10.2
+  use_mass_theta_E_correlation: false
+
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  min_magnification: 4.0
+  max_magnification: 25.0
+  theta_E_hard_max: 5.0
+  source_fraction_mean: 0.22
+  source_fraction_sigma: 0.20
+  source_fraction_min: 0.08
+  source_fraction_max: 0.40
+  lens_radius_min: 0.25
+  lens_radius_max: 1.2
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.85
+
+field:
+  density_mag_limit: 23.5
+  avoid_center_arcsec: 1.2
+  min_pair_separation_arcsec: 0.4
+  max_fraction_of_half_size: 0.92
+  size_max_arcsec: 1.5
+  min_count: 0
+
+photometry:
+  lens_mag_min: 18.5
+  lens_mag_max: 21.5
+  lens_base_mag_zero: 20.5
+  lens_redshift_log_slope: 0.0
+  use_catalog_lens_mags: false
+  source_mag_min: 19.5
+  source_mag_max: 21.8
+  min_source_fainter_than_lens_mag: -0.3
+  max_source_fainter_than_lens_mag: 1.2
+  visible_arc_mag_diff_max: 1.2
+  visible_arc_source_mag_max: 21.5
+  source_mag_diff_min: -0.2
+  source_mag_diff_max: 1.0
+  source_base_mag: 20.6
+  field_mag_limit: 23.5
+
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+  bt_fractions:
+    elliptical: 0.92
+    s0: 0.85
+    spiral: 0.25
+
+lens_morphology:
+  force_morph_type: elliptical
+  min_lens_sersic: 3.5
+
+tng_mode:
+  enabled: false
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.0
+  group:
+    fraction: 0.0
+  binary_sie_sie:
+    fraction: 1.0
+  binary_nfw_nfw:
+    fraction: 0.0
+  binary_shear_only:
+    fraction: 0.0
+
+binary_lenses:
+  enabled: true
+  mass_ratio:
+    min: 0.35
+    max: 0.85
+  separation:
+    min_in_einstein_radii: 0.4
+    max_in_einstein_radii: 1.2
+
+environment:
+  types:
+    galaxy_pair:
+      fraction: 1.0
+      galaxy_count_mean: 2.5
+      galaxy_count_std: 0.6
+      separation_mean: 3.0
+      avoid_factor: 1.1
+      max_radius_arcsec: 28.0
+      shear_min: 0.04
+      shear_max: 0.12
+
+fundamental_plane:
+  enabled: true
+  update_theta_E: true
+  catalog_theta_E_weight: 0.75
+
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  extended_image_fov_arcmin: 1.0
+  extended_lensing_fov_arcmin: 1.0
+  stacked_npy:
+    enabled: false
+  rgb:
+    field_overlay: true
+    field_overlay_snr: 3.5
+    sat_percent: 0.08
+    sigma_mult: 1.0
+    soft_clip: false
+    color_enhance: 1.20
+    arc_boost: 0.40
+    linked_stretch: true
+
+detector_chain:
+  enabled: true
+
+telescope_configs:
+  euclid:
+    bands: ["EUCLID_VIS", "EUCLID_Y", "EUCLID_J", "EUCLID_H"]
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 600
+    lens_population:
+      redshifts:
+        lens_min: 0.65
+        lens_max: 0.75
+        source_min: 1.8
+        source_max: 2.8
+        min_delta_z: 0.8
+      theta_E:
+        min: 1.8
+        max: 2.8
+        median: 2.25
+        log_scatter: 0.12
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

@@ -1,0 +1,32 @@
+outputs/
+models/
+*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+.qodo/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+
+# Generated model checkpoints (Phase 9 generative morphology)
+src/prism/morphology/generative/checkpoints/*.pt
+
+# Local API credentials (never commit)
+.tng_api_key

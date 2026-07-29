@@ -1,0 +1,7 @@
+morph_type=spiral
+label=Spiral
+n_sersic=1.5
+q=0.7
+R_eff=1.0
+bulge:Sersic(n=4.0,Re=0.18")
+disk:Exp(h=1.05")

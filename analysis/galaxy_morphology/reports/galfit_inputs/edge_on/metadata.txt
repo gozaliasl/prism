@@ -1,0 +1,7 @@
+morph_type=edge_on
+label=Edge-on Disk
+n_sersic=1.0
+q=0.2
+R_eff=1.1
+bulge:Sersic(n=4.0,Re=0.17")
+disk:Exp(h=1.38")

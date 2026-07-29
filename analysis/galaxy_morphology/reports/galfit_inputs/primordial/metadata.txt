@@ -1,0 +1,6 @@
+morph_type=primordial
+label=Primordial
+n_sersic=0.3
+q=0.6
+R_eff=0.7
+disk:Sersic(n=0.5,Re=0.70")

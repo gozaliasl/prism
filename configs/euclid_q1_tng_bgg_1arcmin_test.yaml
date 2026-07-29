@@ -1,0 +1,208 @@
+# BGG / massive group lens test — Euclid Q1 + TNG particles
+# NOTE: 100% TNG particle field rendering homogenizes morphology. Prefer:
+#   configs/euclid_q1_hybrid_bgg_1arcmin.yaml
+# 1′×1′ FOV, visually detectable lens + lensed arcs, observational field density
+# Central quiescent BGG deflector + group satellites (not rich cluster)
+
+n_lenses: 3
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 90
+
+telescope: euclid
+
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  use_population_priors: true
+  use_q1_photometry: true
+  use_q1_shear: true
+  resample_theta_E: true
+  shear_range:
+    min: 0.04
+    max: 0.18
+
+multi_resolution:
+  enabled: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+redshifts:
+  lens_min: 0.35
+  lens_max: 0.85
+  source_min: 1.0
+  source_max: 2.5
+  enforce_source_behind_lens: true
+  min_delta_z: 0.4
+
+mass:
+  lens_mass_min: 11.0
+  lens_mass_max: 12.2
+  use_mass_theta_E_correlation: true
+
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  min_magnification: 4.0
+  max_magnification: 18.0
+  source_fraction_mean: 0.22
+  source_fraction_sigma: 0.35
+  source_fraction_min: 0.08
+  source_fraction_max: 0.45
+  lens_radius_min: 0.45
+  lens_radius_max: 2.0
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.75
+
+field:
+  # COSMOS-Web density at this limit (~24.5 AB) drives count for 1′ FOV
+  density_mag_limit: 24.5
+  expected_density_per_arcsec2: 0.018
+  avoid_center_arcsec: 0.35
+  min_pair_separation_arcsec: 0.10
+  max_fraction_of_half_size: 0.92
+  min_count: 8
+
+photometry:
+  lens_mag_min: 18.0
+  lens_mag_max: 22.5
+  source_mag_min: 18.5
+  source_mag_max: 22.0
+  min_source_fainter_than_lens_mag: 0.4
+  max_source_fainter_than_lens_mag: 1.2
+  visible_arc_mag_diff_max: 1.0
+  visible_arc_source_mag_max: 20.5
+  source_mag_diff_min: 0.4
+  source_mag_diff_max: 1.5
+  source_base_mag: 19.8
+
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+
+tng_mode:
+  enabled: true
+  sim_mode: tng_mixed
+  local_catalog_path: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet
+  local_catalog_path_tng50: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng50-1_local_catalog.parquet
+  logM_tol: 0.45
+  max_attempts: 25
+  require_local_particles: true
+  lens_sfr_class: quiescent
+  lens_environment: group
+  source_logM_default: 9.8
+  source_logM_scatter: 0.45
+  field_enabled: true
+  field_fraction: 1.0
+  field_logM_default: 9.0
+  field_logM_scatter: 0.65
+  environment_drives_field_count: true
+  particle_morphology:
+    enabled: true
+    min_particles: 200
+    min_particles_field: 50
+    lens_enabled: true
+    lens_fraction: 1.0
+    source_enabled: true
+    source_fraction: 1.0
+    source_smooth_sigma: 0.8
+    field_enabled: true
+    field_fraction: 1.0
+    companion_enabled: true
+    companion_fraction: 1.0
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.0
+  group:
+    fraction: 1.0
+  binary_sie_sie:
+    fraction: 0.0
+  binary_nfw_nfw:
+    fraction: 0.0
+  binary_shear_only:
+    fraction: 0.0
+
+environment:
+  types:
+    group:
+      fraction: 1.0
+      galaxy_count_mean: 4.5
+      galaxy_count_std: 1.4
+      min_galaxies: 2
+      max_galaxies: 8
+      separation_mean: 1.4
+      avoid_factor: 1.0
+      max_radius_arcsec: 25.0
+      shear_min: 0.04
+      shear_max: 0.14
+
+fundamental_plane:
+  enabled: true
+
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  extended_image_fov_arcmin: 1.0
+  extended_lensing_fov_arcmin: 1.0
+  stacked_npy:
+    enabled: true
+
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+
+telescope_configs:
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 600
+    lens_population:
+      redshifts:
+        lens_min: 0.35
+        lens_max: 0.85
+        source_min: 1.0
+        source_max: 2.5
+        min_delta_z: 0.4
+      theta_E:
+        min: 0.55
+        max: 1.8
+        median: 0.95
+        log_scatter: 0.30
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

@@ -1,0 +1,7 @@
+morph_type=late_spiral
+label=Late Spiral (Sc/Sd)
+n_sersic=1.0
+q=0.45
+R_eff=1.2
+bulge:Sersic(n=2.5,Re=0.14")
+disk:Exp(h=1.62")

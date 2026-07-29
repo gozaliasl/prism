@@ -1,0 +1,6 @@
+morph_type=elliptical
+label=Elliptical
+n_sersic=4.2
+q=0.75
+R_eff=0.8
+bulge:Sersic(n=4.0,Re=0.80")

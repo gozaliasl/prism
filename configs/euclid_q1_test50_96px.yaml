@@ -1,0 +1,134 @@
+# Euclid Q1 test run: 50 lenses, 96×96 @ 0.10"/pix (9.6"×9.6" FOV)
+# All bands: EUCLID_VIS, EUCLID_Y, EUCLID_J, EUCLID_H
+# Uses empirical Q1 PSF library + population priors
+
+n_lenses: 50
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 80
+
+image_size: 96
+pixel_scale: 0.10
+
+telescope: euclid
+
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  use_population_priors: true
+  use_q1_photometry: true
+  use_q1_shear: true
+  resample_theta_E: true
+  shear_range:
+    min: 0.02
+    max: 0.20
+
+multi_resolution:
+  enabled: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+photometry:
+  lens_mag_min: 18.5
+  lens_mag_max: 23.5
+  source_mag_min: 20.0
+  source_mag_max: 27.0
+  min_source_fainter_than_lens_mag: 1.0
+  source_mag_diff_min: 1.0
+  source_mag_diff_max: 3.5
+
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+
+tng_mode:
+  enabled: false
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+
+telescope_configs:
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 96
+    lens_population:
+      redshifts:
+        lens_min: 0.2
+        lens_max: 1.1
+        source_min: 1.0
+        source_max: 4.0
+        min_delta_z: 0.4
+      theta_E:
+        min: 0.45
+        max: 2.4
+        median: 0.88
+        log_scatter: 0.35
+      detected_fraction: 0.7
+      extended_theta_E:
+        min: 0.05
+        max: 2.4
+        median: 0.45
+        log_scatter: 0.6
+      extended_redshifts:
+        lens_min: 0.1
+        lens_max: 3.0
+        source_min: 1.0
+        source_max: 6.0
+        min_delta_z: 0.3
+
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 0.55
+  group:
+    fraction: 0.15
+  binary_sie_sie:
+    fraction: 0.15
+  binary_nfw_nfw:
+    fraction: 0.15
+  binary_shear_only:
+    fraction: 0.0
+
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  stacked_npy:
+    enabled: true
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

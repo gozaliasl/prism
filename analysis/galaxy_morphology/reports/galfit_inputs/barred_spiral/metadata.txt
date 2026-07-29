@@ -1,0 +1,8 @@
+morph_type=barred_spiral
+label=Barred Spiral
+n_sersic=1.5
+q=0.75
+R_eff=1.0
+bulge:Sersic(n=4.0,Re=0.16")
+disk:Exp(h=1.00")
+bar:Sersic(n=0.5,Re=0.67")

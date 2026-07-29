@@ -1,0 +1,6 @@
+morph_type=irregular
+label=Irregular
+n_sersic=0.6
+q=0.55
+R_eff=0.9
+disk:Sersic(n=0.8,Re=0.90")

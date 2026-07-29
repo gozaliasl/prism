@@ -1,0 +1,9 @@
+Metric,Batch A (Empirical),Batch B (Median)
+Total Lenses,434,434
+Total Non-Lenses,5000,3000
+Total Samples,5434,3434
+Mean Lens Redshift,1.064,1.059
+Mean Einstein Radius (arcsec),0.659,0.659
+Mean Source Redshift,3.502,3.596
+Mean Lens Radius (arcsec),0.419,0.419
+Mean Source Radius (arcsec),0.086,0.086

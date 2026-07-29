@@ -1,0 +1,6 @@
+morph_type=starburst
+label=Starburst
+n_sersic=0.6
+q=0.5
+R_eff=0.8
+disk:Sersic(n=0.9,Re=0.80")

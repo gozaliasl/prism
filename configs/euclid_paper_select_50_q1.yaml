@@ -1,0 +1,279 @@
+# Euclid 1′ paper-candidate pool — FULL Q1 lens priors + κ/γ/μ/flexion
+#
+# Euclid Q1 modelling sample drives:
+#   • Empirical Q1 PSF tiles (VIS/Y/J/H)
+#   • θ_E, ellipticity, shear, Sersic from Q1 posteriors
+#   • VIS/Y/J/H photometry from Q1 MGE
+#
+# Products per lens:
+#   • unified_npz (4-band images + intermediates)
+#   • jpg_rgb (Trilogy colour)
+#   • kappa_maps/  (κ, γ, μ, α, F, G — native + 1′ extended)
+#   • measurements CSV (harvested lensing scalars)
+#
+# Run:
+#   ./scripts/local/run_paper_select_50_q1.sh
+#   python scripts/local/harvest_lensing_measurements.py outputs/euclid_paper_select_50_q1
+
+n_lenses: 50
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 80
+
+telescope: euclid
+
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  use_population_priors: true    # θ_E, e, shear, Sersic from Q1 models
+  use_q1_photometry: true        # VIS/Y/J/H mags from Q1 MGE
+  use_q1_shear: true             # per-system shear from Q1
+  resample_theta_E: true
+  shear_range:
+    min: 0.02
+    max: 0.20
+
+multi_resolution:
+  enabled: false
+
+bands:
+- EUCLID_VIS
+- EUCLID_Y
+- EUCLID_J
+- EUCLID_H
+
+redshifts:
+  lens_min: 0.30
+  lens_max: 0.70
+  source_min: 1.0
+  source_max: 2.8
+  enforce_source_behind_lens: true
+  min_delta_z: 0.5
+
+mass:
+  lens_mass_min: 10.5
+  lens_mass_max: 12.2
+  use_mass_theta_E_correlation: true
+
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  # Q1 median μ≈2.6; allow weaker systems while keeping visible arcs
+  min_magnification: 2.5
+  max_magnification: 25.0
+  # Q1 θ_E median ≈0.85″ (max ~4.3″) — do not force large-ring hard max
+  theta_E_hard_max: 5.0
+  source_fraction_mean: 0.18
+  source_fraction_sigma: 0.35
+  source_fraction_min: 0.05
+  source_fraction_max: 0.40
+  lens_radius_min: 0.35
+  lens_radius_max: 2.0
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.85
+
+field:
+  density_mag_limit: 23.5
+  avoid_center_arcsec: 0.8
+  min_pair_separation_arcsec: 0.4
+  max_fraction_of_half_size: 0.92
+  size_max_arcsec: 1.5
+  size_max_fraction_of_lens: 0.75
+  min_count: 0
+
+photometry:
+  # Q1 MGE magnitude ranges
+  lens_mag_min: 18.5
+  lens_mag_max: 23.0
+  lens_base_mag_zero: 20.5
+  lens_redshift_log_slope: 0.4
+  use_catalog_lens_mags: false
+  source_mag_min: 20.0
+  source_mag_max: 24.5
+  min_source_fainter_than_lens_mag: 0.8
+  max_source_fainter_than_lens_mag: 3.5
+  visible_arc_mag_diff_max: 3.0
+  visible_arc_source_mag_max: 24.0
+  source_mag_diff_min: 0.5
+  source_mag_diff_max: 3.5
+  source_base_mag: 21.5
+  field_mag_limit: 23.5
+
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+  native_ring_merger_geometry: false
+  bt_fractions:
+    elliptical: 0.95
+    s0: 0.90
+    spiral: 0.22
+  components:
+    bulge:
+      n_sersic: 4.0
+      r_frac: 0.28
+    disk:
+      n_sersic: 1.0
+      r_frac: 0.85
+
+lens_morphology:
+  force_morph_type: elliptical
+  min_lens_sersic: 3.8
+
+tng_mode:
+  enabled: true
+  sim_mode: tng_mixed
+  local_catalog_path: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet
+  local_catalog_path_tng50: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng50-1_local_catalog.parquet
+  logM_tol: 0.50
+  max_attempts: 30
+  require_local_particles: false
+  lens_sfr_class: quiescent
+  lens_environment: group
+  source_logM_default: 10.0
+  source_logM_scatter: 0.4
+  field_enabled: false
+  # Use lens-class environment (isolated/pair/group) for field richness,
+  # not the matched TNG FoF label — otherwise every SF lens inherits group N.
+  environment_drives_field_count: false
+  particle_morphology:
+    enabled: false
+
+galaxygenius_stamps:
+  enabled: false
+
+time_delays:
+  enabled: false
+
+lens_class_distribution:
+  enabled: true
+  # Balanced pool for paper selection (~1/3 each)
+  single_field:
+    fraction: 0.34
+  group:
+    fraction: 0.33
+  binary_sie_sie:
+    fraction: 0.33
+  binary_nfw_nfw:
+    fraction: 0.0
+  binary_shear_only:
+    fraction: 0.0
+
+environment:
+  types:
+    group:
+      fraction: 0.33
+      galaxy_count_mean: 4.5
+      galaxy_count_std: 1.0
+      separation_mean: 3.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 28.0
+      shear_min: 0.06
+      shear_max: 0.16
+    isolated_field:
+      fraction: 0.34
+      galaxy_count_mean: 2.5
+      galaxy_count_std: 0.6
+      separation_mean: 4.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 28.0
+      shear_min: 0.03
+      shear_max: 0.10
+    galaxy_pair:
+      fraction: 0.33
+      galaxy_count_mean: 3.0
+      galaxy_count_std: 0.7
+      separation_mean: 3.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 28.0
+      shear_min: 0.05
+      shear_max: 0.14
+
+# FP for σ + Re; blend θ_E with catalog (60/40)
+fundamental_plane:
+  enabled: true
+  update_theta_E: true
+  catalog_theta_E_weight: 0.85  # prefer Q1 θ_E over FP-SIS
+
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  extended_image_fov_arcmin: 1.0
+  extended_lensing_fov_arcmin: 1.0
+  stacked_npy:
+    enabled: false
+  rgb:
+    # Trilogy is the project default for Euclid RGB (paper quality on sims).
+    use_eummy: false
+    use_trilogy: true
+    eummy:
+      scales: auto
+      pivot: 0.15
+      fr: 0.3
+      saturate: 1.8
+      contrast: 1.2
+      sky_subtract: true
+      unsharp: [1.2, 0.55, 0.08]
+    trilogy:
+      noiselum: 0.12
+      satpercent: 0.001
+      colorsatfac: 1.5
+      correctbias: true
+      sky_subtract: true
+    arc_boost: 0.30
+    band_style_stretch: false
+    soft_clip: false
+    field_overlay: false
+    sat_percent: 0.001
+    sigma_mult: 1.2
+    color_enhance: 1.0
+    linked_stretch: true
+    noise_level: 0.15
+
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+
+telescope_configs:
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.10
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 600
+    lens_population:
+      redshifts:
+        lens_min: 0.30
+        lens_max: 0.70
+        source_min: 1.0
+        source_max: 2.8
+        min_delta_z: 0.5
+      # Fallback if Q1 resample skipped; Q1 median θ_E ≈ 0.85″
+      theta_E:
+        min: 0.40
+        max: 4.30
+        median: 0.85
+        log_scatter: 0.35
+
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

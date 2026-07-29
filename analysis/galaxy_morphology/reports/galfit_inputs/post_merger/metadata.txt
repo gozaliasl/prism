@@ -1,0 +1,8 @@
+morph_type=post_merger
+label=Post-Merger
+n_sersic=3.2
+q=0.65
+R_eff=0.9
+bulge:Sersic(n=4.0,Re=0.18")
+disk:Exp(h=0.76")
+bulge_secondary:Sersic(n=4.0,Re=0.11")
