@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prism-lensing"
 version = "0.1.0"
-description = "PRISM: multi-telescope mock strong-lens simulation pipeline (JWST, Euclid, Roman, Rubin/LSST, Subaru)"
+description = "PRISM: a multi-telescope physically realistic strong lensing image simulation (JWST, Euclid, Roman, Rubin/LSST, Subaru)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

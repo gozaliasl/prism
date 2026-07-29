@@ -1,4 +1,4 @@
-# PRISM — Multi-Telescope Mock Strong Lens Simulator
+# PRISM — a Multi-Telescope Physically Realistic Strong Lensing Image Simulation
 
 A physically-realistic pipeline for generating mock strong gravitational lens observations
 across five space and ground-based telescopes. Built on real COSMOS-Web data, empirical
