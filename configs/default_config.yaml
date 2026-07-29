@@ -258,13 +258,31 @@ lens_class_distribution:
 
 # Mass–size relation selection for lenses
 mass_size:
+  # Directory containing cowls_redshift_binned_relations.csv,
+  # massive_galaxy_redshift_binned_relations.csv, and
+  # bgg_size_mass_relations.csv. Falls back to ./data/ then
+  # ./analysis/mass_size_relations/ (relative to cwd) if unset.
+  data_dir: /Volumes/exthd-prism/prism-data/catalogs/relations
   lens_relation_mix:
-    cowls_fraction: 0.40   # Probability a lens uses COWLS redshift-binned relation
-    cwmgs_fraction: 0.60   # Probability a lens uses CWMGs redshift-binned relation
+    # COWLS disabled by default: its redshift-binned fits have very low
+    # R^2 (0.003-0.25) and small samples (20-146 lenses/bin) with wildly
+    # swinging slopes (-3.5 to +5.4) -- a lens-selected sample too small/
+    # noisy to trust for per-bin mass-size slopes. This was previously
+    # silently inert (a path-resolution bug always made the loader return
+    # None), so re-enable only after re-deriving COWLS fits from a larger
+    # sample or applying a lensing-selection-bias correction.
+    cowls_fraction: 0.0
+    cwmgs_fraction: 1.0   # Probability a lens uses CWMGs redshift-binned relation
   fallback_global:
     slope: 0.387           # log10(Re/kpc) = slope * log10(M*) + intercept
     intercept: -3.843
     size_evolution_exponent: -0.2   # Re(z) ∝ (1+z)^{exp}
+  # Brightest Group Galaxy (BGG) size-mass relation from Gozaliasl et al.
+  # (2025, A&A 703, A129), Table D.1, Color+sSFR classification. Applied to
+  # a fraction of lens galaxies to represent group-central deflectors; PRISM
+  # lenses are early-type by design (Section: Fundamental Plane), so the
+  # quiescent (QG) row is used.
+  bgg_fraction: 0.15   # Probability a lens galaxy is treated as a BGG
 
 # Environmental diversity (adapted for 9"×9" cutout - NOT full field)
 # Original COWLS values were for larger fields; scaled for 300×300 pixel cutout

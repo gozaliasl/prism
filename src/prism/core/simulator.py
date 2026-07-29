@@ -261,6 +261,30 @@ def angular_diameter_distance(z):
 _COWLS_MS_BINS = None
 _CWMGS_MS_BINS = None
 
+
+def _resolve_mass_size_data_path(filename):
+    """Resolve a mass-size relation CSV against, in order: CONFIG['mass_size']['data_dir'],
+    the current working directory's data/ folder, and the current working
+    directory's analysis/mass_size_relations/ folder. Returns None if not found.
+
+    (Previously this resolved paths relative to this source file's own
+    location -- src/prism/core/ -- which never matched any real data/ or
+    analysis/ directory after the package restructure, silently disabling
+    the CWMGs/COWLS mass-size relations in favor of the generic fallback.)
+    """
+    candidates = []
+    _ms_cfg = CONFIG.get('mass_size', {}) if isinstance(CONFIG, dict) else {}
+    _data_dir = _ms_cfg.get('data_dir')
+    if _data_dir:
+        candidates.append(Path(_data_dir) / filename)
+    candidates.append(Path("data") / filename)
+    candidates.append(Path("analysis/mass_size_relations") / filename)
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
 def _load_cowls_mass_size_bins():
     """Load COSMOS-Web (COWLS) redshift-binned mass–size relation if present.
     Expects CSV with columns: z_min, z_max, alpha, beta.
@@ -270,10 +294,8 @@ def _load_cowls_mass_size_bins():
     global _COWLS_MS_BINS
     if _COWLS_MS_BINS is not None:
         return _COWLS_MS_BINS
-    # Prefer project data folder for runtime inputs
-    data_path = Path(__file__).resolve().parents[1] / "data/cowls_redshift_binned_relations.csv"
-    csv_path = data_path if data_path.exists() else Path(__file__).resolve().parents[1] / "analysis/mass_size_relations/cowls_redshift_binned_relations.csv"
-    if not csv_path.exists():
+    csv_path = _resolve_mass_size_data_path("cowls_redshift_binned_relations.csv")
+    if csv_path is None:
         _COWLS_MS_BINS = None
         return None
     try:
@@ -308,10 +330,8 @@ def _load_cwmgs_mass_size_bins():
     global _CWMGS_MS_BINS
     if _CWMGS_MS_BINS is not None:
         return _CWMGS_MS_BINS
-    # Prefer project data folder for runtime inputs
-    data_path = Path(__file__).resolve().parents[1] / "data/massive_galaxy_redshift_binned_relations.csv"
-    csv_path = data_path if data_path.exists() else Path(__file__).resolve().parents[1] / "analysis/mass_size_relations/massive_galaxy_redshift_binned_relations.csv"
-    if not csv_path.exists():
+    csv_path = _resolve_mass_size_data_path("massive_galaxy_redshift_binned_relations.csv")
+    if csv_path is None:
         _CWMGS_MS_BINS = None
         return None
     try:
@@ -337,14 +357,90 @@ def _load_cwmgs_mass_size_bins():
     return _CWMGS_MS_BINS
 
 
-def mass_size_relation(mass_log10, z, rng):
+_BGG_MS_BINS = None
+_BGG_PIVOT_LOG_MASS = np.log10(5.0e10)  # Gozaliasl+2025 pivot mass, 5x10^10 Msun
+
+
+def _load_bgg_mass_size_bins():
+    """Load the Brightest Group Galaxy (BGG) size-mass relation from
+    Gozaliasl et al. (2025, A&A 703, A129), Table D.1 (Color+sSFR
+    classification). Expects columns: z_min, z_max, type (SF/QG), logA,
+    alpha. The published form is
+      log10(Re/kpc) = logA + alpha * log10(M*/5e10 Msun),
+    which is converted here to this module's raw (unpivoted) convention
+      log10(Re/kpc) = slope*log10(M*) + intercept
+    via intercept = logA - alpha*log10(5e10).
+    Returns {'SF': [...], 'QG': [...]} or None if unavailable.
+    """
+    global _BGG_MS_BINS
+    if _BGG_MS_BINS is not None:
+        return _BGG_MS_BINS
+    csv_path = _resolve_mass_size_data_path("bgg_size_mass_relations.csv")
+    if csv_path is None:
+        _BGG_MS_BINS = None
+        return None
+    try:
+        df = pd.read_csv(csv_path)
+        bins = {'SF': [], 'QG': []}
+        for _, row in df.iterrows():
+            gal_type = str(row.get("type", "")).strip().upper()
+            if gal_type not in bins:
+                continue
+            zmin = float(row.get("z_min", np.nan))
+            zmax = float(row.get("z_max", np.nan))
+            log_a = float(row.get("logA", np.nan))
+            alpha = float(row.get("alpha", np.nan))
+            if not (np.isfinite(zmin) and np.isfinite(zmax) and np.isfinite(log_a) and np.isfinite(alpha)):
+                continue
+            intercept = log_a - alpha * _BGG_PIVOT_LOG_MASS
+            bins[gal_type].append({"z_min": zmin, "z_max": zmax, "slope": alpha, "intercept": intercept})
+        _BGG_MS_BINS = bins if (bins['SF'] or bins['QG']) else None
+    except Exception:
+        _BGG_MS_BINS = None
+    return _BGG_MS_BINS
+
+
+def _select_ms_bin(chosen_bins, z):
+    selected = None
+    for b in chosen_bins:
+        if b["z_min"] <= z < b["z_max"]:
+            selected = b
+            break
+    if selected is None:
+        def z_center(b):
+            return 0.5 * (float(b["z_min"]) + float(b["z_max"]))
+        selected = sorted(chosen_bins, key=lambda b: abs(z_center(b) - z))[0]
+    return selected
+
+
+def mass_size_relation(mass_log10, z, rng, is_bgg=False, bgg_type='QG'):
     """
     Sample effective radius from mass–size relation.
     Preference order:
-      1) COSMOS-Web COWLS redshift-binned relation if available
-      2) Empirical global relation with mild size evolution
+      1) BGG-specific relation (Gozaliasl+2025) if is_bgg=True and available
+      2) COSMOS-Web COWLS / CWMGs redshift-binned relation if available
+      3) Empirical global relation with mild size evolution
     Returns R_eff in kpc.
+
+    is_bgg : bool
+        If True, use the Brightest Group Galaxy relation instead of the
+        general CWMGs/COWLS relations (see mass_size.bgg_fraction in config).
+    bgg_type : str
+        'QG' (quiescent) or 'SF' (star-forming) BGG row to use when
+        is_bgg=True. PRISM lens galaxies are early-type by design
+        (Section: Fundamental Plane), so 'QG' is the appropriate default.
     """
+    if is_bgg:
+        _bgg_bins = _load_bgg_mass_size_bins()
+        _bgg_rows = _bgg_bins.get(bgg_type) if _bgg_bins else None
+        if _bgg_rows:
+            selected = _select_ms_bin(_bgg_rows, z)
+            log_reff = selected["slope"] * mass_log10 + selected["intercept"]
+            log_reff += rng.normal(0, 0.2)
+            reff_kpc = 10 ** log_reff
+            return float(np.clip(reff_kpc, 0.3, 50.0))
+        # BGG data unavailable -- fall through to the general relations below.
+
     # Decide dataset per config: cowls vs cwmgs fraction
     ms_cfg = CONFIG.get('mass_size', {}).get('lens_relation_mix', {})
     cowls_frac = float(ms_cfg.get('cowls_fraction', 0.4))
@@ -5597,6 +5693,16 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         # subhalo's actual stellar half-mass radius.
         if _tng_lens is not None:
             reff_kpc = _tng_lens['halfmassrad_stars_kpc']
+        else:
+            # Brightest Group Galaxy (BGG) environmental effect: a fraction
+            # of (non-TNG-matched) lens galaxies are treated as group-central
+            # deflectors and use the Gozaliasl+2025 BGG size-mass relation
+            # (quiescent row, since PRISM lenses are early-type by design)
+            # instead of the field FP/CWMGs relation, overriding whatever Re
+            # the branch above produced.
+            _bgg_frac = float(CONFIG.get('mass_size', {}).get('bgg_fraction', 0.0))
+            if rng.random() < _bgg_frac:
+                reff_kpc = mass_size_relation(lens_mass_log10, lens_z, rng, is_bgg=True, bgg_type='QG')
 
         # Convert to angular radius
         lens_radius = convert_physical_to_angular_radius(reff_kpc, lens_z)
@@ -6976,6 +7082,10 @@ def simulate_lens_system_with_time_delays(row, band_cfgs, rng, field_pop=None,
         reff_kpc = mass_size_relation(lens_mass_log10, lens_z, rng)
     if _tng_lens is not None:
         reff_kpc = _tng_lens['halfmassrad_stars_kpc']
+    else:
+        _bgg_frac = float(CONFIG.get('mass_size', {}).get('bgg_fraction', 0.0))
+        if rng.random() < _bgg_frac:
+            reff_kpc = mass_size_relation(lens_mass_log10, lens_z, rng, is_bgg=True, bgg_type='QG')
     fixed_lens_radius = convert_physical_to_angular_radius(reff_kpc, lens_z)
     fixed_lens_radius = np.clip(fixed_lens_radius,
                                 geo.get('lens_radius_min', 0.2),
