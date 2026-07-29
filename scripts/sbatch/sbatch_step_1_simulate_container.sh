@@ -19,7 +19,7 @@ OUTPUT_BASE_DEFAULT="/scratch/ituomine/gozaliasl/jwst-mock-lens-simulator/output
 OUTPUT_BASE="${OUTPUT_BASE:-$OUTPUT_BASE_DEFAULT}"
 WORK_DIR_DEFAULT="/scratch/ituomine/gozaliasl/jwst-mock-lens-simulator"
 WORK_DIR="${WORK_DIR:-$WORK_DIR_DEFAULT}"
-CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif}"
+CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/prism.sif}"
 
 # Derive variations if auto
 COWLS_N_LENSES=434
@@ -79,7 +79,7 @@ $CONTAINER_CMD exec \
   bash -c "
     set -e
     mkdir -p /output && \
-    python3 src/jwst_lens_simulator.py \
+    python3 -m prism.core.simulator \
       --mode training \
       --output-dir /output/segmentation_training_${TIMESTAMP} \
       --n-lenses $N_LENSES \

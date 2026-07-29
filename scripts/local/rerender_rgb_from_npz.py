@@ -21,7 +21,7 @@ from PIL import Image
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
-import src.jwst_lens_simulator as sim  # noqa: E402
+import prism.core.simulator as sim  # noqa: E402
 
 
 def _load_meta(data) -> dict:

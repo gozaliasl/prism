@@ -63,7 +63,7 @@ echo "[RUN] log=$LOG"
 echo "[RUN] est. wall time: ~15–45 min for full candidate set"
 
 CMD=(
-  python -u src/jwst_lens_simulator.py
+  python -u -m prism.core.simulator
   --config "$CONFIG"
   --cosmos_catalog data/cosmos_web_lens_structural_properties.csv
   --lens_analysis_catalog data/lens_analysis_catalog.csv

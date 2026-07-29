@@ -49,18 +49,18 @@ fi
 if [ -n "$CONTAINER_PATH" ] && [ -f "$CONTAINER_PATH" ]; then
     # Use explicitly set path
     :
-elif [ -f "/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif" ]; then
+elif [ -f "/scratch/ituomine/gozaliasl/prism.sif" ]; then
     # Use known project location
-    CONTAINER_PATH="/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif"
-elif [ -f "$SCRATCH_BASE/jwst_lens_simulator.sif" ]; then
+    CONTAINER_PATH="/scratch/ituomine/gozaliasl/prism.sif"
+elif [ -f "$SCRATCH_BASE/prism.sif" ]; then
     # Use scratch root
-    CONTAINER_PATH="$SCRATCH_BASE/jwst_lens_simulator.sif"
-elif [ -f "$WORK_DIR/jwst_lens_simulator.sif" ]; then
+    CONTAINER_PATH="$SCRATCH_BASE/prism.sif"
+elif [ -f "$WORK_DIR/prism.sif" ]; then
     # Use project directory
-    CONTAINER_PATH="$WORK_DIR/jwst_lens_simulator.sif"
+    CONTAINER_PATH="$WORK_DIR/prism.sif"
 else
     # Default fallback
-    CONTAINER_PATH="$SCRATCH_BASE/jwst_lens_simulator.sif"
+    CONTAINER_PATH="$SCRATCH_BASE/prism.sif"
 fi
 
 # Check if container exists
@@ -69,7 +69,7 @@ if [ ! -f "$CONTAINER_PATH" ]; then
     echo ""
     echo "Please:"
     echo "  1. Build container: cd container && ./build_container.sh"
-    echo "  2. Transfer to Mahti: scp jwst_lens_simulator.sif <user>@mahti.csc.fi:$SCRATCH_BASE/"
+    echo "  2. Transfer to Mahti: scp prism.sif <user>@mahti.csc.fi:$SCRATCH_BASE/"
     echo "  3. Set CONTAINER_PATH environment variable or update this script"
     exit 1
 fi

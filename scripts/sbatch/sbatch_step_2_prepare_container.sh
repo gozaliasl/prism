@@ -11,7 +11,7 @@ set -e
 
 WORK_DIR_DEFAULT="/scratch/ituomine/gozaliasl/jwst-mock-lens-simulator"
 WORK_DIR="${WORK_DIR:-$WORK_DIR_DEFAULT}"
-CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif}"
+CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/prism.sif}"
 
 # Use last output dir if not provided
 if [ -z "$SIM_OUTPUT_DIR" ] && [ -f "$WORK_DIR/logs/mahti/last_seg_output_dir.txt" ]; then

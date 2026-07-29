@@ -50,7 +50,7 @@ echo "  Seed:       ${SEED}"
 echo "  Output:     ${OUTPUT_DIR}"
 echo "========================================================"
 
-nohup "$PYTHON" src/jwst_lens_simulator.py \
+nohup "$PYTHON" -m prism.core.simulator \
     --config "$PROJECT_ROOT/configs/jades_config.yaml" \
     --cosmos_catalog "$PROJECT_ROOT/data/cosmos_web_lens_structural_properties.csv" \
     --lens_analysis_catalog "$PROJECT_ROOT/data/lens_analysis_catalog.csv" \

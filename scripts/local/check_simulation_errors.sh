@@ -61,7 +61,7 @@ echo "7️⃣  Running Small Test Simulation (10 lenses, 10 non-lenses)..."
 echo "   This will help identify any runtime errors..."
 echo ""
 
-python src/jwst_lens_simulator.py \
+python -m prism.core.simulator \
     --config configs/default_config.yaml \
     --cosmos_catalog data/cosmos_web_lens_structural_properties.csv \
     --lens_analysis_catalog data/lens_analysis_catalog.csv \

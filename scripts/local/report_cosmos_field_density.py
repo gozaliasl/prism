@@ -19,7 +19,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
-from src.jwst_lens_simulator import (  # noqa: E402
+from prism.core.simulator import (  # noqa: E402
     cosmos_field_density_per_arcmin2,
     field_galaxy_count_target,
 )

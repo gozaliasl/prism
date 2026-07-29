@@ -512,7 +512,7 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
-$PYTHON_CMD "$PROJECT_ROOT/src/jwst_lens_simulator.py" \
+$PYTHON_CMD -m prism.core.simulator \
     --config "$CONFIG" \
     --cosmos_catalog "$COSMOS_CATALOG" \
     --lens_analysis_catalog "$LENS_ANALYSIS" \

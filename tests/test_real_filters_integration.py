@@ -23,7 +23,7 @@ except Exception as e:
 # Test 2: Import main simulator with real filters
 print("\n[2] Importing main simulator with real filter support...")
 try:
-    import prism.core.jwst_lens_simulator as jwst_lens_simulator
+    import prism.core.simulator as jwst_lens_simulator
     print(f"    ✓ Main simulator imported")
     print(f"    ✓ Real filters available in simulator: {jwst_lens_simulator.REAL_FILTERS_AVAILABLE}")
 except Exception as e:

@@ -131,7 +131,7 @@ run_telescope() {
     echo "  Output:    $OUT"
     echo "========================================"
 
-    "$PYTHON" src/jwst_lens_simulator.py \
+    "$PYTHON" -m prism.core.simulator \
         --config "$CONFIG_DIR/config_${TEL}.yaml" \
         $CATALOGS \
         --output_dir "$OUT" \

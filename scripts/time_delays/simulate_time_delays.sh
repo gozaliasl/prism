@@ -175,7 +175,7 @@ echo ""
 echo "🎬 Generating time delay simulations..."
 echo ""
 
-python3 src/jwst_lens_simulator.py \
+python3 -m prism.core.simulator \
     --config "$CONFIG" \
     --cosmos_catalog "$COSMOS_CATALOG" \
     --lens_analysis_catalog "$LENS_ANALYSIS" \

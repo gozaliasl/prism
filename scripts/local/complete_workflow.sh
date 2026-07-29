@@ -335,7 +335,7 @@ if [[ "$MODE" == "production" ]]; then
     
     echo "📊 Batch A: Empirical noise/PSF"
     echo "Output: $OUT_A"
-    python src/jwst_lens_simulator.py \
+    python -m prism.core.simulator \
         --config "$CONFIG" \
         --cosmos_catalog "$COSMOS_CATALOG" \
         --lens_analysis_catalog "$LENS_ANALYSIS" \
@@ -367,7 +367,7 @@ EOF
     echo ""
     echo "📊 Batch B: Ablation study (median noise/PSF)"
     echo "Output: $OUT_B"
-    python src/jwst_lens_simulator.py \
+    python -m prism.core.simulator \
         --config "$ABLATION_CFG" \
         --cosmos_catalog "$COSMOS_CATALOG" \
         --lens_analysis_catalog "$LENS_ANALYSIS" \
@@ -461,7 +461,7 @@ lens_class_distribution:
     fraction: 0.0
 EOF
         
-        python src/jwst_lens_simulator.py \
+        python -m prism.core.simulator \
             --config "$SF_CFG" \
             --cosmos_catalog "$COSMOS_CATALOG" \
             --lens_analysis_catalog "$LENS_ANALYSIS" \
@@ -523,7 +523,7 @@ binary_lenses:
     shear_only: $SHEAR_FRACTION
 EOF
         
-        python src/jwst_lens_simulator.py \
+        python -m prism.core.simulator \
             --config "$BINARY_CFG" \
             --cosmos_catalog "$COSMOS_CATALOG" \
             --lens_analysis_catalog "$LENS_ANALYSIS" \
@@ -575,7 +575,7 @@ group_lenses:
   n_members: 3
 EOF
         
-        python src/jwst_lens_simulator.py \
+        python -m prism.core.simulator \
             --config "$GROUP_CFG" \
             --cosmos_catalog "$COSMOS_CATALOG" \
             --lens_analysis_catalog "$LENS_ANALYSIS" \

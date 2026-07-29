@@ -12,7 +12,7 @@ Re-render previews from saved science arrays (no re-simulation):
   from PIL import Image
   import numpy as np, sys
   sys.path.insert(0, 'src')
-  from prism.core.jwst_lens_simulator import create_jwst_panel_rgb, load_config
+  from prism.core.simulator import create_jwst_panel_rgb, load_config
   load_config('configs/euclid_q1_hybrid_test50_96px.yaml')
   bands = ['EUCLID_VIS','EUCLID_Y','EUCLID_J','EUCLID_H']
   out = Path('outputs/euclid_q1_hybrid_test50_96px/unified_npz')
@@ -47,7 +47,7 @@ from prism.morphology.tng_particle_light import (  # noqa: E402
     BAND_AGE_METAL_LUMINOSITY,
     _stellar_band_luminosity,
 )
-from prism.core.jwst_lens_simulator import (  # noqa: E402
+from prism.core.simulator import (  # noqa: E402
     TELESCOPE_RGB_PARAMS,
     _normalize_for_rgb_composite_core,
     _rgb_arc_residual,

@@ -40,7 +40,7 @@ def _run_sim(telescope: str, n: int, seed: int) -> Path:
 
     out.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable, "-u", str(REPO / "src" / "jwst_lens_simulator.py"),
+        sys.executable, "-u", "-m", "prism.core.simulator",
         "--config", str(cfg),
         "--cosmos_catalog", "data/cosmos_web_lens_structural_properties.csv",
         "--lens_analysis_catalog", "data/lens_analysis_catalog.csv",
@@ -66,7 +66,7 @@ def _run_sim(telescope: str, n: int, seed: int) -> Path:
 def _load_rgb_from_npz(npz_path: Path, telescope: str) -> np.ndarray:
     sys.path.insert(0, str(REPO))
     import yaml
-    import src.jwst_lens_simulator as sim
+    import prism.core.simulator as sim
 
     cfg_name = "twin_cosj100011_jwst.yaml" if telescope == "jwst" else "twin_cosj100011_euclid.yaml"
     cfg = yaml.safe_load((REPO / "configs" / cfg_name).read_text())

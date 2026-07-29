@@ -22,7 +22,7 @@ chmod +x build_on_mahti.sh
 ./build_on_mahti.sh
 ```
 
-The container will be built in your scratch directory (e.g., `/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif`).
+The container will be built in your scratch directory (e.g., `/scratch/ituomine/gozaliasl/prism.sif`).
 
 ## Option 2: Build Locally with Docker (Alternative)
 
@@ -30,7 +30,7 @@ If you have Docker and want to create a Docker image instead:
 
 ```bash
 cd container
-docker build -f Dockerfile -t jwst_lens_simulator:latest .
+docker build -f Dockerfile -t prism:latest .
 ```
 
 Note: This creates a Docker image, not a Singularity container. You'd need to convert it or use Docker on Mahti.
@@ -41,7 +41,7 @@ If someone has already built the container, you can copy it:
 
 ```bash
 # From another user
-scp <user>@mahti.csc.fi:/scratch/<account>/<user>/jwst_lens_simulator.sif ./
+scp <user>@mahti.csc.fi:/scratch/<account>/<user>/prism.sif ./
 ```
 
 ## Container Size
@@ -53,7 +53,7 @@ The container is approximately 3-5 GB. Make sure you have enough space in your s
 After building, verify the container:
 
 ```bash
-apptainer exec jwst_lens_simulator.sif python3 -c "import torch; print(torch.__version__)"
-apptainer exec jwst_lens_simulator.sif python3 -c "import numpy, pandas, astropy, lenstronomy; print('All packages OK')"
+apptainer exec prism.sif python3 -c "import torch; print(torch.__version__)"
+apptainer exec prism.sif python3 -c "import numpy, pandas, astropy, lenstronomy; print('All packages OK')"
 ```
 

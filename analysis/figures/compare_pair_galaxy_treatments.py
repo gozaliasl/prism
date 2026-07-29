@@ -36,7 +36,7 @@ from matplotlib.gridspec import GridSpec
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'src'))
 
-from prism.core.jwst_lens_simulator import CONFIG
+from prism.core.simulator import CONFIG
 from prism.core.advanced_lens_features import RealisticMassProfiles
 
 try:

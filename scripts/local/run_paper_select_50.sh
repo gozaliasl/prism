@@ -35,7 +35,7 @@ cp -f "$CONFIG" "$OUT_DIR/run_config.yaml"
 LOG="$OUT_DIR/run.log"
 
 CMD=(
-  python -u src/jwst_lens_simulator.py
+  python -u -m prism.core.simulator
   --config "$CONFIG"
   --cosmos_catalog data/cosmos_web_lens_structural_properties.csv
   --lens_analysis_catalog data/lens_analysis_catalog.csv

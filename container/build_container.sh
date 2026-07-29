@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CONTAINER_NAME="${1:-jwst_lens_simulator.sif}"
+CONTAINER_NAME="${1:-prism.sif}"
 CONTAINER_DIR="$SCRIPT_DIR"
 DEF_FILE="$CONTAINER_DIR/Singularity.def"
 

@@ -38,7 +38,7 @@ dependencies = [
 dev = ["pytest>=6.0", "black>=21.0", "flake8>=3.9"]
 
 [project.scripts]
-prism-simulate = "prism.core.jwst_lens_simulator:main"
+prism-simulate = "prism.core.simulator:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

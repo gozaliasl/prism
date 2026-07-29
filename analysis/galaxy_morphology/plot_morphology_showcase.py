@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from prism.morphology import build_components, band_flux_fractions, fractions_to_magnitudes, MORPH_COMPONENTS
 from lenstronomy.SimulationAPI.sim_api import SimAPI
-from prism.core.jwst_lens_simulator import apply_morphological_enhancements
+from prism.core.simulator import apply_morphological_enhancements
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

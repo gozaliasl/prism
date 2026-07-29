@@ -11,7 +11,7 @@ import numpy as np
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from prism.core.jwst_lens_simulator import CONFIG
+from prism.core.simulator import CONFIG
 from prism.core.advanced_lens_features import RealisticMassProfiles
 
 def test_binary_lens_config():
@@ -80,7 +80,7 @@ def test_pipeline_integration():
     
     # Check if import statement exists
     try:
-        from prism.core.jwst_lens_simulator import BINARY_LENS_AVAILABLE
+        from prism.core.simulator import BINARY_LENS_AVAILABLE
         print(f"✓ BINARY_LENS_AVAILABLE flag: {BINARY_LENS_AVAILABLE}")
     except ImportError:
         print("✗ Binary lens import not found in main pipeline")

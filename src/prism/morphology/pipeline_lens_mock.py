@@ -34,7 +34,7 @@ def make_pipeline_demo_row(
     lens_q: float = 0.75,
 ) -> tuple[dict[str, Any], float]:
     """Build a catalog-style row dict matching jwst_lens_simulator fields."""
-    from prism.core.jwst_lens_simulator import UPPER_BANDS, BAND_TO_LOWER
+    from prism.core.simulator import UPPER_BANDS, BAND_TO_LOWER
 
     phot = config.get("photometry", {})
     offset_ratio = 0.42
@@ -92,7 +92,7 @@ def simulate_galaxygenius_pipeline_lens(
     from lenstronomy.SimulationAPI.sim_api import SimAPI
 
     from prism.morphology import build_light_model as gm_build_light_model
-    from prism.core.jwst_lens_simulator import (
+    from prism.core.simulator import (
         UPPER_BANDS,
         apply_psf_convolution,
         ellipticity,
@@ -156,7 +156,7 @@ def simulate_galaxygenius_pipeline_lens(
     lens_mag_by_band = {}
     src_mag_by_band = {}
     for band in UPPER_BANDS:
-        from prism.core.jwst_lens_simulator import BAND_TO_LOWER
+        from prism.core.simulator import BAND_TO_LOWER
         _lm = float(row.get(f"lens_mag_{BAND_TO_LOWER[band]}", phot.get("lens_base_mag_zero", 21.0)))
         _sm = float(row.get(f"source_mag_{BAND_TO_LOWER[band]}", phot.get("source_base_mag", 20.5)))
         _lm = float(np.clip(_lm, phot.get("lens_mag_min", 18.0), phot.get("lens_mag_max", 27.0)))

@@ -30,13 +30,13 @@ echo ""
 # Check Fix #2: Lenstronomy Metadata Removal
 echo "2️⃣  Checking Lenstronomy Metadata Removal..."
 echo ""
-if grep -A 10 "metadata_keys = \[" src/jwst_lens_simulator.py | grep -q "redshift"; then
+if grep -A 10 "metadata_keys = \[" src/prism/core/simulator.py | grep -q "redshift"; then
     echo "✅ PASS: 'redshift' is in metadata removal list"
 else
     echo "❌ FAIL: 'redshift' not found in metadata removal"
 fi
 
-if grep -A 10 "metadata_keys = \[" src/jwst_lens_simulator.py | grep -q "z\|metallicity"; then
+if grep -A 10 "metadata_keys = \[" src/prism/core/simulator.py | grep -q "z\|metallicity"; then
     echo "✅ PASS: Comprehensive metadata removal implemented"
 else
     echo "❌ FAIL: Metadata removal seems incomplete"
@@ -53,11 +53,11 @@ else
     echo "❌ FAIL: enhanced_field_sampling.py has syntax errors"
 fi
 
-python3 -m py_compile src/jwst_lens_simulator.py 2>&1 | head -5
+python3 -m py_compile src/prism/core/simulator.py 2>&1 | head -5
 if [ $? -eq 0 ]; then
-    echo "✅ PASS: jwst_lens_simulator.py syntax OK"
+    echo "✅ PASS: prism.core.simulator syntax OK"
 else
-    echo "❌ FAIL: jwst_lens_simulator.py has syntax errors"
+    echo "❌ FAIL: prism.core.simulator has syntax errors"
 fi
 echo ""
 

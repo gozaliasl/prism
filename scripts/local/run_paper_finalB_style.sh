@@ -60,7 +60,7 @@ echo "[RUN] FOV=1.0 arcmin @ 0.10 arcsec/pix (600×600), θ_E hard max=10″"
 echo "[RUN] log=$LOG"
 
 CMD=(
-  python -u src/jwst_lens_simulator.py
+  python -u -m prism.core.simulator
   --config "$CONFIG"
   --cosmos_catalog data/cosmos_web_lens_structural_properties.csv
   --lens_analysis_catalog data/lens_analysis_catalog.csv

@@ -261,7 +261,7 @@ def enhance_showcase_model(image, morph_type, params, idx, numpix, pixel_scale):
         return img
 
     if morph_type in ('irregular', 'clumpy', 'starburst', 'primordial'):
-        from prism.core.jwst_lens_simulator import add_clumpy_structure_to_image
+        from prism.core.simulator import add_clumpy_structure_to_image
         n_clumps = {'irregular': 12, 'clumpy': 14, 'starburst': 16, 'primordial': 18}[morph_type]
         strength = {'irregular': 0.45, 'clumpy': 0.55, 'starburst': 0.65, 'primordial': 0.60}[morph_type]
         return add_clumpy_structure_to_image(
@@ -270,7 +270,7 @@ def enhance_showcase_model(image, morph_type, params, idx, numpix, pixel_scale):
         )
 
     if morph_type == 'ring':
-        from prism.core.jwst_lens_simulator import add_ring_structure_to_image
+        from prism.core.simulator import add_ring_structure_to_image
         ring_radius = float(np.clip(2.4 * r_eff_pix, 0.12 * numpix, 0.42 * numpix))
         return add_ring_structure_to_image(
             img, center, center, pixel_scale,

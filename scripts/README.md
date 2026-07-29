@@ -161,7 +161,7 @@ sbatch --account ituomine scripts/sbatch/sbatch_step_3_train_container.sh
 
 All container-based scripts require:
 - Container built: `bash container/build_on_mahti.sh`
-- Container path: `/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif` (or set `CONTAINER_PATH`)
+- Container path: `/scratch/ituomine/gozaliasl/prism.sif` (or set `CONTAINER_PATH`)
 
 ## 📝 Notes
 

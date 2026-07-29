@@ -75,7 +75,7 @@ prism-data/
 
 ### Small test run (2 lenses)
 ```bash
-python -m prism.core.jwst_lens_simulator \
+python -m prism.core.simulator \
     --config configs/default_config.yaml \
     --cosmos_catalog /path/to/prism-data/catalogs/cosmos/cosmos_web_lens_structural_properties.csv \
     --output_dir outputs/my_run \
@@ -84,7 +84,7 @@ python -m prism.core.jwst_lens_simulator \
 
 ### 500 JWST lenses with intermediate images saved
 ```bash
-python -m prism.core.jwst_lens_simulator \
+python -m prism.core.simulator \
     --config configs/default_config.yaml \
     --cosmos_catalog /path/to/prism-data/catalogs/cosmos/cosmos_web_lens_structural_properties.csv \
     --lens_analysis_catalog /path/to/prism-data/catalogs/cosmos/lens_analysis_catalog.csv \

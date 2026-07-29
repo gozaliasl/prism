@@ -18,7 +18,7 @@ from matplotlib.colors import TwoSlopeNorm
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.jwst_lens_simulator import CONFIG, COSMO, generate_subhalo_population  # noqa: E402
+from prism.core.simulator import CONFIG, COSMO, generate_subhalo_population  # noqa: E402
 from src.prism_kappa_output import compute_kappa_products  # noqa: E402
 from lenstronomy.LensModel.lens_model import LensModel  # noqa: E402
 from lenstronomy.LensModel.lens_model_extensions import LensModelExtensions  # noqa: E402

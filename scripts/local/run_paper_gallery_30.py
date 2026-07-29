@@ -374,7 +374,7 @@ def run_cell(morph: str, klass: str, n_lenses: int, dry_run: bool) -> Path:
 
     seed = SEEDS[(morph, klass)]
     cmd = [
-        sys.executable, "-u", str(REPO / "src" / "jwst_lens_simulator.py"),
+        sys.executable, "-u", "-m", "prism.core.simulator",
         "--config", str(cfg_path),
         "--cosmos_catalog", "data/cosmos_web_lens_structural_properties.csv",
         "--lens_analysis_catalog", "data/lens_analysis_catalog.csv",

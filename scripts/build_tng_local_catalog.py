@@ -60,7 +60,7 @@ from src.tng_galaxy_selector import (  # noqa: E402
 
 # Default snapshots: nearest TNG100-1 snapshots to z = 0.0 .. 6.5, spanning
 # the lens (z~0.2-1.5), lensed-source, and field-galaxy redshift ranges used
-# by jwst_lens_simulator.py, extended up to z~6.5 (snap12) for high-z
+# by prism.core.simulator, extended up to z~6.5 (snap12) for high-z
 # source/field coverage. Note: TNG100-1's stellar-mass resolution and box
 # size make snap12-20 (z~4.2-6.5) increasingly sparse/small-N at the high-mass
 # end -- see "Scope/limitations" above.

@@ -79,7 +79,7 @@ echo "[RUN] log=$LOG"
 echo "[RUN] estimated wall time (full): ~20–30 h on this machine"
 
 CMD=(
-  python src/jwst_lens_simulator.py
+  python -m prism.core.simulator
   --config "$CONFIG"
   --cosmos_catalog data/cosmos_web_lens_structural_properties.csv
   --lens_analysis_catalog data/lens_analysis_catalog.csv

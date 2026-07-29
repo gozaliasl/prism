@@ -29,7 +29,7 @@ from prism.morphology.pipeline_lens_mock import (
 
 
 def _load_config():
-    from prism.core.jwst_lens_simulator import load_config, create_jwst_band_configs, CONFIG
+    from prism.core.simulator import load_config, create_jwst_band_configs, CONFIG
 
     cfg_path = REPO_ROOT / "configs" / "default_config.yaml"
     load_config(str(cfg_path))
@@ -41,7 +41,7 @@ def _render_component_panels(metadata, band_cfgs, rng, config, gg_cfg, row, lens
     from lenstronomy.SimulationAPI.sim_api import SimAPI
     from prism.morphology import build_light_model as gm_build_light_model
     from prism.morphology.stamp_compositor import build_galaxygenius_interpol_kwargs
-    from prism.core.jwst_lens_simulator import (
+    from prism.core.simulator import (
         UPPER_BANDS,
         BAND_TO_LOWER,
         apply_psf_convolution,
@@ -143,7 +143,7 @@ def _show(ax, image, title, fov, note=None):
 def main():
     config = _load_config()
     rng = np.random.default_rng(42)
-    from prism.core.jwst_lens_simulator import create_jwst_band_configs
+    from prism.core.simulator import create_jwst_band_configs
 
     band_cfgs = create_jwst_band_configs(rng=rng, use_distribution=False)
     figures_dir = REPO_ROOT / "analysis" / "galaxy_morphology" / "reports" / "figures"

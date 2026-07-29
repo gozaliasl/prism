@@ -5,7 +5,7 @@ Reads the local TNG catalog built by ``build_tng_local_catalog.py`` and
 selects candidates spanning redshift/snapshot, stellar-mass, environment
 (isolated/pair/group/rich_group), and sSFR-derived galaxy type
 (passive/star_forming/dusty_starburst -- same thresholds as
-``tng_sed_galaxy_type`` in ``jwst_lens_simulator.py``).
+``tng_sed_galaxy_type`` in ``prism.core.simulator``).
 
 Goal: a visually diverse set of lens/source/field/environmental galaxy
 templates (different morphologies, colors, sizes) across the full
@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.tng_galaxy_selector import load_local_catalog  # noqa: E402
 
 # Same thresholds as TNG_QUENCHED_SSFR_THRESHOLD / TNG_STARBURST_SSFR_THRESHOLD
-# in src/jwst_lens_simulator.py.
+# in src/prism/core/simulator.py.
 QUENCHED_SSFR_THRESHOLD = 1e-11
 STARBURST_SSFR_THRESHOLD = 1e-9
 

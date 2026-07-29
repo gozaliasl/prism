@@ -11,7 +11,7 @@ set -e
 
 WORK_DIR_DEFAULT="/scratch/ituomine/gozaliasl/jwst-mock-lens-simulator"
 WORK_DIR="${WORK_DIR:-$WORK_DIR_DEFAULT}"
-CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/jwst_lens_simulator.sif}"
+CONTAINER_PATH="${CONTAINER_PATH:-/scratch/ituomine/gozaliasl/prism.sif}"
 TRAINING_EPOCHS="${TRAINING_EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 DEVICE="${DEVICE:-cuda}"

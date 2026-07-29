@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTAINER_NAME="jwst_lens_simulator.sif"
+CONTAINER_NAME="prism.sif"
 DEF_FILE="$SCRIPT_DIR/Singularity.def"
 
 echo "============================================================================"

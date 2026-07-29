@@ -40,7 +40,7 @@ fail=0
 
 # Print COSMOS density table used for this run
 python - <<'PY'
-from src.jwst_lens_simulator import cosmos_field_density_per_arcmin2, field_galaxy_count_target
+from prism.core.simulator import cosmos_field_density_per_arcmin2, field_galaxy_count_target
 print("[COSMOS-Web] surface density (data/galaxy_catalog.fits):")
 for m in (21.5, 23.5, 24.5, 26.0):
     d = cosmos_field_density_per_arcmin2(m)
@@ -56,7 +56,7 @@ cp -f "$CONFIG" "$OUT_DIR/run_config.yaml"
 LOG="$OUT_DIR/run.log"
 
 CMD=(
-  python -u src/jwst_lens_simulator.py
+  python -u -m prism.core.simulator
   --config "$CONFIG"
   --cosmos_catalog data/cosmos_web_lens_structural_properties.csv
   --lens_analysis_catalog data/lens_analysis_catalog.csv
