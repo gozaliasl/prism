@@ -1222,7 +1222,8 @@ def get_psf_for_simulation(psf_data, lens_id=None, rng=None, ra=None, dec=None, 
                 pass
         if tile is None and lens_id is not None:
             try:
-                assign_path = Path('data/euclid_q1_psf/psf_assignment.csv')
+                _q1_data_dir = CONFIG.get('euclid_q1', {}).get('data_dir', 'data/euclid_q1_psf') if isinstance(CONFIG, dict) else 'data/euclid_q1_psf'
+                assign_path = Path(_q1_data_dir) / 'psf_assignment.csv'
                 if assign_path.exists():
                     psf_assignments = pd.read_csv(assign_path)
                     lens_assignments = psf_assignments[psf_assignments['lens_id'] == lens_id]
@@ -6201,6 +6202,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         lens_kw_by_band = {b: [_bgi(**{**_gen_l_base, 'magnitude_ref': lens_mag_by_band[b]})] for b in UPPER_BANDS}
         print(f"[GENERATIVE] lens galaxy forced to VAE (morph={_l_galaxy_type} logM={_tng_lens['stellar_mass_logmsun']:.1f})")
     else:
+        lens_morph_cfg = CONFIG.get('lens_morphology', {}) if isinstance(CONFIG, dict) else {}
         _force_lens_morph = lens_morph_cfg.get('force_morph_type') if isinstance(lens_morph_cfg, dict) else None
         lens_fragment, lens_kw_by_band, _lens_morph_type = gm_build_light_model(
             'lens', main_lens_light, lens_mag_by_band, UPPER_BANDS, rng, CONFIG,
@@ -10096,7 +10098,9 @@ Example usage:
                 assign_df = lens_catalog[['lens_id', 'euclid_psf_tile']].rename(
                     columns={'euclid_psf_tile': 'tile'})
                 assign_df['psf_source'] = 'euclid_q1'
-                assign_path = Path('data/euclid_q1_psf/psf_assignment.csv')
+                _q1_data_dir = CONFIG.get('euclid_q1', {}).get('data_dir', 'data/euclid_q1_psf') if isinstance(CONFIG, dict) else 'data/euclid_q1_psf'
+                assign_path = Path(_q1_data_dir) / 'psf_assignment.csv'
+                assign_path.parent.mkdir(parents=True, exist_ok=True)
                 assign_df.to_csv(assign_path, index=False)
                 print(f"✓ Euclid Q1 PSF assignments written: {len(assign_df)} lenses → {assign_path}")
             _q1_cat = get_euclid_q1_catalog(CONFIG)

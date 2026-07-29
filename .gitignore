@@ -30,3 +30,7 @@ src/prism/morphology/generative/checkpoints/*.pt
 
 # Local API credentials (never commit)
 .tng_api_key
+
+# Runtime PSF cache accidentally written into the package tree by a
+# relative-path fallback (should resolve against prism-data instead)
+src/prism/data/
