@@ -20,6 +20,8 @@ References:
   Euclid Collaboration 2022; Akeson et al. 2019 (Roman).
 """
 
+import zlib
+
 import numpy as np
 from scipy.ndimage import convolve
 from scipy.signal import fftconvolve
@@ -279,7 +281,12 @@ class DetectorChain:
         # PRNU map (fixed for this detector tile / seed)
         prnu_key = (telescope, numpix, seed_prnu)
         if prnu_key not in DetectorChain._PRNU_CACHE:
-            prng = np.random.default_rng(seed_prnu + hash(telescope) % (2**31))
+            # FIX (adversarial audit finding C-5, 2026-08-01): hash() on a
+            # str is salted per-process (PYTHONHASHSEED) by default, so the
+            # PRNU flat-field pattern -- and everything downstream of it --
+            # differed between runs even at identical seed_prnu. crc32 is
+            # deterministic across processes/machines.
+            prng = np.random.default_rng((seed_prnu + zlib.crc32(telescope.encode())) % (2**31))
             prnu = prng.normal(1.0, self.params['prnu_rms'],
                                (numpix, numpix)).astype(np.float32)
             prnu = np.clip(prnu, 0.5, 1.5)

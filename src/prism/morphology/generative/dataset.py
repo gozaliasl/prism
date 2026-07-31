@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import zoom
 
-from src.tng_galaxy_selector import load_local_catalog, local_particle_path
-from src.galaxy_morphology.tng_particle_light import _band_images
+from prism.selection.tng_galaxy_selector import load_local_catalog, local_particle_path
+from prism.morphology.tng_particle_light import _band_images
 
 STAMP_SIZE = 64
 

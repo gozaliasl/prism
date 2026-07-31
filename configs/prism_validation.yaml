@@ -1,0 +1,199 @@
+n_lenses: 1
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 100
+telescope: jwst
+pixel_scale: 0.031
+bands:
+- F115W
+- F150W
+- F277W
+- F444W
+redshifts:
+  lens_min: 0.45
+  lens_max: 0.45
+  source_min: 1.75
+  source_max: 1.75
+  enforce_source_behind_lens: true
+  min_delta_z: 0.6
+mass:
+  lens_mass_min: 11.75
+  lens_mass_max: 11.95
+  use_mass_theta_E_correlation: true
+geometry:
+  visible_lensed_arcs: true
+  force_caustic_source_position: true
+  min_magnification: 5.0
+  max_magnification: 35.0
+  theta_E_hard_max: 16.0
+  group_scale_theta_E:
+    enabled: true
+    min: 2.5
+    max: 4.5
+  source_fraction_mean: 0.16
+  source_fraction_sigma: 0.18
+  source_fraction_min: 0.06
+  source_fraction_max: 0.3
+  lens_radius_min: 0.6
+  lens_radius_max: 3.0
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.65
+field:
+  density_mag_limit: 24.5
+  lens_sightline_overdensity_factor: 1.05  # corrected 2026-08-01, was 1.7 (footprint-area artifact)
+  avoid_center_arcsec: 2.5
+  min_pair_separation_arcsec: 0.5
+  max_fraction_of_half_size: 0.95
+  size_max_arcsec: 2.0
+  size_max_fraction_of_lens: 0.75
+  min_count: 0
+photometry:
+  lens_mag_min: 17.5
+  lens_mag_max: 20.5
+  lens_base_mag_zero: 18.5
+  lens_redshift_log_slope: 0.5
+  use_catalog_lens_mags: false
+  source_mag_min: 19.5
+  source_mag_max: 22.5
+  min_source_fainter_than_lens_mag: 0.3
+  max_source_fainter_than_lens_mag: 1.3
+  visible_arc_mag_diff_max: 1.3
+  visible_arc_source_mag_max: 22.5
+  source_mag_diff_min: 0.3
+  source_mag_diff_max: 1.3
+  source_base_mag: 20.0
+  field_mag_limit: 24.5
+morphology:
+  multicomponent_enabled: true
+  apply_to_lens: true
+  apply_to_source: true
+  native_ring_merger_geometry: false
+  bt_fractions:
+    elliptical: 0.95
+    s0: 0.9
+    spiral: 0.22
+  components:
+    bulge:
+      n_sersic: 4.0
+      r_frac: 0.28
+    disk:
+      n_sersic: 1.0
+      r_frac: 0.85
+lens_morphology:
+  force_morph_type: elliptical
+  min_lens_sersic: 3.8
+tng_mode:
+  enabled: false
+  particle_morphology:
+    enabled: false
+galaxygenius_stamps:
+  enabled: false
+  fraction: 0.6
+  source_enabled: false
+  source_fraction: 0.0
+  lens_enabled: false
+  lens_fraction: 0.0
+  field_target_size_factor: 4.0
+time_delays:
+  enabled: false
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 1.0
+  group:
+    fraction: 0.0
+  binary_sie_sie:
+    fraction: 0.0
+  binary_nfw_nfw:
+    fraction: 0.0
+  binary_shear_only:
+    fraction: 0.0
+environment:
+  types:
+    isolated_field:
+      fraction: 0.0
+      galaxy_count_mean: 2.5
+      galaxy_count_std: 0.6
+      separation_mean: 4.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 28.0
+      shear_min: 0.03
+      shear_max: 0.1
+    group:
+      fraction: 1.0
+      galaxy_count_mean: 3.5
+      galaxy_count_std: 0.7
+      separation_mean: 3.5
+      avoid_factor: 1.1
+      max_radius_arcsec: 28.0
+      shear_min: 0.06
+      shear_max: 0.16
+    galaxy_pair:
+      fraction: 0.0
+      galaxy_count_mean: 3.0
+      galaxy_count_std: 0.7
+      separation_mean: 3.5
+      avoid_factor: 1.2
+      max_radius_arcsec: 28.0
+      shear_min: 0.05
+      shear_max: 0.14
+fundamental_plane:
+  enabled: true
+  update_theta_E: true
+  catalog_theta_E_weight: 0.0
+output:
+  unified_storage: true
+  save_intermediate_rgb_jpg: true
+  extended_image_fov_arcmin: 1.0
+  extended_lensing_fov_arcmin: 1.0
+  stacked_npy:
+    enabled: false
+  rgb:
+    use_eummy: false
+telescope_configs:
+  roman:
+    bands:
+    - ROMAN_F106
+    - ROMAN_F129
+    - ROMAN_F158
+    - ROMAN_F184
+    pixel_scale: 0.11
+    exposure_time: 146.0
+    magnitude_zero_point: 28.09
+    image_size: 128
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.1
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 128
+  subaru:
+    bands:
+    - SUBARU_G
+    - SUBARU_R
+    - SUBARU_I
+    - SUBARU_Z
+    pixel_scale: 0.168
+    exposure_time: 600.0
+    magnitude_zero_point: 27.9
+    image_size: 128
+  lsst:
+    bands:
+    - LSST_G
+    - LSST_R
+    - LSST_I
+    - LSST_Z
+    pixel_scale: 0.2
+    exposure_time: 30.0
+    magnitude_zero_point: 27.79
+    image_size: 128
+    coadd_visits: 1
+add_artifacts: true
+add_noise: true
+save_intermediate_images: true
+save_npy: true
+save_jpg: true

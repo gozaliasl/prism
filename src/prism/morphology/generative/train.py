@@ -18,8 +18,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from src.galaxy_morphology.generative.dataset import COND_DIM, STAMP_SIZE, build_dataset
-from src.galaxy_morphology.generative.model import ConditionalVAE, vae_loss
+from prism.morphology.generative.dataset import COND_DIM, STAMP_SIZE, build_dataset
+from prism.morphology.generative.model import ConditionalVAE, vae_loss
 
 DEFAULT_CATALOG = "/Volumes/extHD/tng_local_catalog/tng100-1_local_catalog.parquet"
 

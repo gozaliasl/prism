@@ -29,7 +29,7 @@ python cosmos_web_lens_mock_v11_enhanced_morphology_full.py \
   --variations_per_base 25 --n_field_max 5 --add_artifacts
 """
 
-import os, sys, math, time, argparse, json, traceback
+import os, sys, math, time, argparse, json, traceback, zlib
 import yaml
 from typing import Optional
 from pathlib import Path
@@ -557,11 +557,29 @@ def field_galaxy_count_target(numpix, pixel_scale, env_params, config=None):
 
     Primary source: the real COSMOS-Web detection density
     (cosmos_field_density_per_arcmin2) at the configured source magnitude
-    limit, scaled by the FOV area and an environment-relative richness
+    limit, scaled by the FOV area, an environment-relative richness
     multiplier (the ratio of this environment's galaxy_count_mean to the
-    isolated_field reference value of 2.5 -- i.e. config still controls how
-    much richer a 'group' environment is than 'isolated_field', but the
-    absolute scale now comes from real survey data instead of a guess).
+    isolated_field reference value of 2.5), AND a lens-sightline
+    overdensity factor -- real strong-lens galaxies are not randomly
+    positioned draws from the field; they trace large-scale structure, so
+    their surroundings are measurably richer than a flat field average.
+
+    The overdensity factor (default 1.05x) is measured directly from the
+    356 real COWLS lenses against the full COSMOS-Web catalog
+    (prism/environment/cowls_neighborhood_density.py). CORRECTED
+    2026-08-01 (adversarial audit finding C-1): the originally-reported
+    1.70x was a footprint-area measurement artifact -- the lens-
+    neighborhood density used a circular-aperture area while the field-
+    average comparison used an RA/Dec BOUNDING BOX area, which overstates
+    the true (non-rectangular) COSMOS-Web mosaic footprint by ~1.63x. That
+    area bug, not a real overdensity signal, was responsible for nearly
+    the entire "1.70x". After fixing compare_to_field_average() to use a
+    grid-cell footprint (matching this file's own
+    cosmos_field_density_per_arcmin2 methodology) and filtering catalog
+    sentinels consistently, the real overdensity is 1.03-1.07x across
+    mag<24.5 through mag<28 (using mag_f115w to match the band used by
+    cosmos_field_density_per_arcmin2 below -- the original measurement
+    also mixed bands, mag_f150w vs mag_f115w). 1.05x is the mean.
 
     Falls back to the older purely-parametric area-scaling (see
     field_density_area_scale) if the catalog isn't available.
@@ -575,11 +593,12 @@ def field_galaxy_count_target(numpix, pixel_scale, env_params, config=None):
     )
     catalog_path = cfg.get("catalogs", {}).get("galaxy_catalog_fits", "data/galaxy_catalog.fits")
     density_per_arcmin2 = cosmos_field_density_per_arcmin2(mag_limit, catalog_path)
+    overdensity_factor = field_cfg.get("lens_sightline_overdensity_factor", 1.05)
 
     if density_per_arcmin2 > 0:
         fov_arcmin2 = (numpix * pixel_scale / 60.0) ** 2
         richness_mult = env_params.get("galaxy_count_mean", 2.5) / 2.5
-        mean = density_per_arcmin2 * fov_arcmin2 * richness_mult
+        mean = density_per_arcmin2 * overdensity_factor * fov_arcmin2 * richness_mult
         std = mean * 0.25  # ~25% field-to-field scatter (Poisson + clustering)
         return mean, std
 
@@ -2801,7 +2820,7 @@ def classify_galaxy_morphology_enhanced(n_sersic, q_ratio, rng=None, allow_ring=
     try:
         from prism.morphology.taxonomy import classify_morphology
     except ImportError:
-        from src.galaxy_morphology.taxonomy import classify_morphology
+        from prism.morphology.taxonomy import classify_morphology
     return classify_morphology(n_sersic, q_ratio, rng, allow_ring=allow_ring)
 
 def classify_galaxy_colors_enhanced(redshift, n_sersic, rng):
@@ -2882,7 +2901,16 @@ def cosmos_field_galaxy_properties(mag_limit, catalog_path="data/galaxy_catalog.
         return None
 
     valid = (
-        np.isfinite(cached["mag_f115w"]) & (cached["mag_f115w"] > -90) & (cached["mag_f115w"] < mag_limit)
+        # FIX (adversarial audit finding C-4, 2026-08-01): "> -90" does not
+        # reject this catalog's actual null-photometry sentinel, which
+        # reaches ~-88.95 -- it passed the old check and was rendered as a
+        # real galaxy. Measured impact: in the mag<22.5 pool, 10.86% of
+        # rows were brighter than mag 16 (min -88.95); these saturate the
+        # detector (identical ~84.7 e-/s flux in all 4 bands = full-well
+        # clipping, confirmed by execution). Nothing in a real COSMOS-Web
+        # field is brighter than AB~15, so use a physical bound instead of
+        # a sentinel guard.
+        np.isfinite(cached["mag_f115w"]) & (cached["mag_f115w"] > 15.0) & (cached["mag_f115w"] < mag_limit)
         & np.isfinite(cached["radius_deg"]) & (cached["radius_deg"] > 0)
         & np.isfinite(cached["axis_ratio"]) & (cached["axis_ratio"] > 0) & (cached["axis_ratio"] <= 1.0)
         & np.isfinite(cached["n_sersic"]) & (cached["n_sersic"] > 0)
@@ -3009,8 +3037,25 @@ def generate_synthetic_field_population(rng, n_field, numpix, pixel_scale=None):
 
         positions.append((x_pos, y_pos))
 
-    mag_limit = CONFIG.get('photometry', {}).get('source_mag_max', 27.5) if isinstance(CONFIG, dict) else 27.5
-    catalog_path = CONFIG.get('catalogs', {}).get('galaxy_catalog_fits', 'data/galaxy_catalog.fits') if isinstance(CONFIG, dict) else 'data/galaxy_catalog.fits'
+    # FIX (adversarial audit finding C-4, 2026-08-01): this used to read
+    # photometry.source_mag_max (a SOURCE-galaxy config key, e.g. 22.5),
+    # while field_galaxy_count_target() -- which decides HOW MANY field
+    # galaxies to place -- reads field.density_mag_limit (e.g. 24.5). The
+    # two disagreed by ~2 mag, so the code rendered a COUNT calibrated to
+    # a 24.5 depth using PROPERTIES bootstrap-resampled from a pool cut at
+    # only 22.5 -- i.e. the right number of galaxies, all systematically
+    # too bright. Read the same key both places.
+    if isinstance(CONFIG, dict):
+        _field_cfg = CONFIG.get('field', {})
+        mag_limit = _field_cfg.get(
+            'density_mag_limit',
+            CONFIG.get('photometry', {}).get('field_mag_limit',
+                CONFIG.get('photometry', {}).get('source_mag_max', 27.5)),
+        )
+        catalog_path = CONFIG.get('catalogs', {}).get('galaxy_catalog_fits', 'data/galaxy_catalog.fits')
+    else:
+        mag_limit = 27.5
+        catalog_path = 'data/galaxy_catalog.fits'
     x_arr = [p[0] for p in positions]
     y_arr = [p[1] for p in positions]
     field_galaxies = sample_cosmos_field_galaxies(rng, n_field, x_arr, y_arr, mag_limit, catalog_path)
@@ -3347,7 +3392,12 @@ def get_realistic_jwst_color(morph_type, n_sersic, base_band='F150W', target_ban
         multi-band colors.
     """
     if rng is None:
-        rng = np.random.default_rng()
+        # FIX (audit C-5): a bare default_rng() draws fresh OS entropy,
+        # ignoring args.seed entirely and breaking reproducibility even
+        # when a caller forgot to pass its own `rng`. Seed from the (now
+        # seeded-at-startup, see main()) global np.random stream instead,
+        # so behavior is deterministic given a fixed call order.
+        rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
 
     if base_band == target_band:
         return 0.0
@@ -3492,7 +3542,12 @@ def get_realistic_jwst_color_from_transmission(morph_type: str, n_sersic: float,
         Magnitude difference (mag_target - mag_base) in ABs
     """
     if rng is None:
-        rng = np.random.default_rng()
+        # FIX (audit C-5): a bare default_rng() draws fresh OS entropy,
+        # ignoring args.seed entirely and breaking reproducibility even
+        # when a caller forgot to pass its own `rng`. Seed from the (now
+        # seeded-at-startup, see main()) global np.random stream instead,
+        # so behavior is deterministic given a fixed call order.
+        rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
 
     if base_band == target_band:
         return 0.0
@@ -3752,7 +3807,7 @@ def tag_field_galaxies_with_tng_particles(field_galaxies, rng, config=None):
         try:
             from prism.morphology.generative.inference import is_available as _generative_available
         except ImportError:
-            from src.galaxy_morphology.generative.inference import is_available as _generative_available
+            from prism.morphology.generative.inference import is_available as _generative_available
         generative_enabled = _generative_available(_generative_ckpt) if _generative_ckpt else _generative_available()
 
     for gal in field_galaxies:
@@ -3919,7 +3974,7 @@ def apply_real_jwst_colors_to_field_galaxies(field_galaxies, band, rng):
             try:
                 from prism.morphology.generative.inference import build_generative_interpol_kwargs
             except ImportError:
-                from src.galaxy_morphology.generative.inference import build_generative_interpol_kwargs
+                from prism.morphology.generative.inference import build_generative_interpol_kwargs
             _pm_cfg = (CONFIG or {}).get('tng_mode', {}).get('particle_morphology', {})
             _gen_ckpt = _pm_cfg.get('generative_checkpoint', None)
             tng_info = gal.get('tng_info')
@@ -4210,7 +4265,12 @@ def extract_restframe_struct(struct_df, z_series, rest_um=1.6):
 def sample_sersic_n(z, measured=None, rng=None):
     """Sample Sersic index with redshift evolution"""
     if rng is None:
-        rng = np.random.default_rng()
+        # FIX (audit C-5): a bare default_rng() draws fresh OS entropy,
+        # ignoring args.seed entirely and breaking reproducibility even
+        # when a caller forgot to pass its own `rng`. Seed from the (now
+        # seeded-at-startup, see main()) global np.random stream instead,
+        # so behavior is deterministic given a fixed call order.
+        rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
     
     try:
         z = float(z)
@@ -4255,7 +4315,12 @@ def create_jwst_band_configs(rng=None, use_distribution=True):
         Band configurations with noise properties
     """
     if rng is None:
-        rng = np.random.default_rng()
+        # FIX (audit C-5): a bare default_rng() draws fresh OS entropy,
+        # ignoring args.seed entirely and breaking reproducibility even
+        # when a caller forgot to pass its own `rng`. Seed from the (now
+        # seeded-at-startup, see main()) global np.random stream instead,
+        # so behavior is deterministic given a fixed call order.
+        rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
     
     # Try to load empirical noise sampler
     sampler = None
@@ -4997,7 +5062,12 @@ def build_field_structural_metadata(field_galaxies):
 def create_parameter_variations(base_catalog, variations_per_base=25, rng=None):
     """Generate diverse variations from limited base catalog"""
     if rng is None:
-        rng = np.random.default_rng()
+        # FIX (audit C-5): a bare default_rng() draws fresh OS entropy,
+        # ignoring args.seed entirely and breaking reproducibility even
+        # when a caller forgot to pass its own `rng`. Seed from the (now
+        # seeded-at-startup, see main()) global np.random stream instead,
+        # so behavior is deterministic given a fixed call order.
+        rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
     
     print(f"[INFO] Creating {variations_per_base} variations per base lens...")
     print(f"[INFO] Input: {len(base_catalog)} base → Output: {len(base_catalog) * variations_per_base} diverse")
@@ -5662,6 +5732,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             )
             reff_kpc = _fp['re_kpc']
             _sigma_kms = _fp['sigma_kms']
+            row["lens_sigma_kms"] = float(_sigma_kms)
             # Optionally keep catalog θ_E (e.g. dramatic paper rings) while
             # still using FP for σ and Re.
             _update_te = bool(_fp_cfg.get('update_theta_E', True))
@@ -5671,6 +5742,65 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                 # Update kwargs_lens only for SIE/SIS — NFW uses Rs/alpha_Rs, not theta_E
                 if lens_model_list and lens_model_list[0] in ('SIE', 'SIS', 'SPEMD', 'SPP'):
                     kwargs_lens[0]['theta_E'] = theta_E
+                # FIX (adversarial audit finding C-2, 2026-08-01): row["theta_E"]
+                # was never updated here, so every saved label/metadata/training-
+                # catalog value downstream of `row` kept reporting the PRE-FP
+                # value while the actual rendered deflector (kwargs_lens, and
+                # everything derived from it: kappa maps, magnification) used
+                # the POST-FP value. Confirmed by execution: metadata reported
+                # theta_E=1.799 while the rendered kappa map's theta_E_eff was
+                # 2.484 (+38%). Writing back here keeps `row` truthful.
+                row["theta_E"] = float(theta_E)
+
+            # === GROUP/CLUSTER-SCALE THETA_E OVERRIDE ===
+            # The catalog/FP pipeline above caps out around ~2-2.5" for
+            # this project's COSMOS-Web single-galaxy mass range, and the
+            # lens_class_distribution "group" class only adds small
+            # satellite perturbers -- it does NOT raise the main deflector's
+            # theta_E. For a genuinely group/cluster-scale lens (needed so
+            # the ring is visible without zooming in on a full 1' field),
+            # directly override theta_E here, bypassing the mass-derived
+            # value.
+            #
+            # NOTE (audit finding C-3): this override intentionally breaks
+            # the physical theta_E<->mass relation for the affected systems
+            # -- it draws a display-motivated Einstein radius, not one
+            # derived from a group halo mass function. That is a real,
+            # documented modelling limitation (see PROJECT_NOTES /
+            # audit report), not something this patch can fix without
+            # implementing group-halo mass sampling. What THIS patch fixes
+            # is INTERNAL CONSISTENCY of what gets recorded: previously
+            # theta_E was overridden but row["theta_E"] and lens_sigma_kms
+            # were left at their pre-override (FP-derived) values, so the
+            # saved labels described a *different, lower-mass* system than
+            # the one actually rendered. Now: row["theta_E"] matches the
+            # rendered deflector, sigma_kms is back-solved from the SIS
+            # relation to be self-consistent with the overridden theta_E
+            # (not left silently contradicting it), and the affected
+            # systems are explicitly flagged in metadata so population
+            # statistics can exclude them if a physically-derived sample
+            # is required.
+            _grp_te_cfg = CONFIG.get('geometry', {}).get('group_scale_theta_E', {})
+            row["theta_E_override_applied"] = False
+            if _grp_te_cfg.get('enabled', False):
+                _te_min = float(_grp_te_cfg.get('min', 6.0))
+                _te_max_grp = float(_grp_te_cfg.get('max', 15.0))
+                _theta_E_pre_override = float(theta_E)
+                theta_E = float(rng.uniform(_te_min, _te_max_grp))
+                if lens_model_list and lens_model_list[0] in ('SIE', 'SIS', 'SPEMD', 'SPP'):
+                    kwargs_lens[0]['theta_E'] = theta_E
+                row["theta_E"] = float(theta_E)
+                row["theta_E_pre_override"] = _theta_E_pre_override
+                row["theta_E_override_applied"] = True
+                # Back-solve the SIS-equivalent sigma_v so the recorded
+                # kinematic label is not left contradicting the rendered
+                # deflector: theta_E = 4*pi*(sigma/c)^2 * D_LS/D_S
+                # (same relation as fundamental_plane.einstein_radius_from_sigma,
+                # inverted).
+                _sigma_kms = float(2.998e5 * np.sqrt(
+                    max(theta_E, 1e-6) / 206265.0 / (4.0 * np.pi * max(_da_ls_over_ds, 1e-6))
+                ))
+                row["lens_sigma_kms"] = _sigma_kms
 
             # Re-derive the source position from the offset/theta_E ratio and
             # angle stored by create_parameter_variations, now that theta_E
@@ -6312,7 +6442,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         try:
             from prism.morphology.generative.inference import build_generative_interpol_kwargs as _bgi
         except ImportError:
-            from src.galaxy_morphology.generative.inference import build_generative_interpol_kwargs as _bgi
+            from prism.morphology.generative.inference import build_generative_interpol_kwargs as _bgi
         _lens_morph_type = None
         lens_fragment = ["INTERPOL"]
         _l_phi_G = 0.5 * np.arctan2(main_lens_light['e2'], main_lens_light['e1'])
@@ -6409,7 +6539,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         try:
             from prism.morphology.generative.inference import build_generative_interpol_kwargs as _bgi_s
         except ImportError:
-            from src.galaxy_morphology.generative.inference import build_generative_interpol_kwargs as _bgi_s
+            from prism.morphology.generative.inference import build_generative_interpol_kwargs as _bgi_s
         source_fragment = ["INTERPOL"]
         _src_z2 = float(row.get("source_redshift", row.get("zs", 2.0)))
         _s_phi_G = 0.5 * np.arctan2(lensed_source['e2'], lensed_source['e1'])
@@ -6699,7 +6829,12 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     # forward into the next band's exposure on the same detector (sequential
     # multi-band readout). Updated after each band via make_persistence_map().
     _persistence_carry = None
-    _prnu_seed = int(abs(hash(str(row.get('lens_id', 0)))) % (2**31))
+    # FIX (audit C-5): Python's hash() on str is salted per-process
+    # (PYTHONHASHSEED) by default -- this seed differed between runs even
+    # at identical --seed, breaking reproducibility of the PRNU flat-field
+    # pattern (and, downstream, the noise realization) entirely. crc32 is
+    # deterministic across processes/machines.
+    _prnu_seed = int(zlib.crc32(str(row.get('lens_id', 0)).encode()) % (2**31))
 
     for b in UPPER_BANDS:
         try:
@@ -6752,7 +6887,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             images[b] = fallback.astype(np.float32)
     
     # Classify lens system
-    from src.lens_system_classifier import LensSystemClassifier
+    from prism.lensing.lens_system_classifier import LensSystemClassifier
     lens_system_class = LensSystemClassifier.classify_lens(lens_model_list, kwargs_lens)
     
     # Enhanced field info with real galaxy + structural metadata
@@ -7253,7 +7388,7 @@ def simulate_lens_system_with_time_delays(row, band_cfgs, rng, field_pop=None,
     field_structural_meta = build_field_structural_metadata(fixed_field_galaxies)
 
     # Classify lens system (needed for kappa map category/sub_type)
-    from src.lens_system_classifier import LensSystemClassifier
+    from prism.lensing.lens_system_classifier import LensSystemClassifier
     lens_system_class = LensSystemClassifier.classify_lens(lens_model_list, kwargs_lens)
 
     # Store consistent field info (will be same for all epochs)
@@ -7855,7 +7990,8 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
     _tel_name_nl = CONFIG.get('telescope', 'jwst').lower()
     _det_enabled_nl = CONFIG.get('detector_chain', {}).get('enabled', True)
     _det_overrides_nl = CONFIG.get('detector_chain', {}).get('effects', {})
-    _prnu_seed_nl = int(abs(hash(str(mode))) % (2**31))
+    # FIX (audit C-5): see PRNU seed fix above -- hash() is process-salted.
+    _prnu_seed_nl = int(zlib.crc32(str(mode).encode()) % (2**31))
 
     for b in UPPER_BANDS:
         try:
@@ -8206,7 +8342,7 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
     """
     active_bands = bands if bands is not None else UPPER_BANDS
     # Generate PRISM-formatted filename: PRISM_[lens|nonlens]_[TYPE_][epoch_]ID
-    from src.lens_system_classifier import LensSystemClassifier
+    from prism.lensing.lens_system_classifier import LensSystemClassifier
     
     sample_type = "lens" if is_lens else "nonlens"
     epoch_str = f"epoch{epoch_index:02d}_" if epoch_index is not None else ""
@@ -8364,6 +8500,22 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
             'theta_E': float(row.get('theta_E', row.get('b', 0.0))),
             'lens_redshift': float(row.get('lens_redshift', row.get('zl', 0.0))),
             'source_redshift': float(row.get('source_redshift', row.get('zs', 0.0))),
+            # Added per adversarial audit findings C-2/C-13 (2026-08-01):
+            # these were previously absent from every saved label, and
+            # theta_E_override_applied lets downstream population-statistics
+            # code exclude the display-motivated group-scale overrides
+            # (which are not derived from a physical group-halo mass
+            # function -- see the override's code comment) from any claim
+            # about a physically-representative theta_E distribution.
+            'theta_E_override_applied': bool(row.get('theta_E_override_applied', False)),
+            'theta_E_pre_override': (float(row['theta_E_pre_override'])
+                                      if row.get('theta_E_pre_override') is not None else None),
+            'lens_sigma_kms': (float(row['lens_sigma_kms'])
+                                if row.get('lens_sigma_kms') is not None else None),
+            'shear_gamma1': (float(row['shear_gamma1'])
+                              if pd.notna(row.get('shear_gamma1', np.nan)) else None),
+            'shear_gamma2': (float(row['shear_gamma2'])
+                              if pd.notna(row.get('shear_gamma2', np.nan)) else None),
         }
         
         if epoch_index is not None:
@@ -8423,7 +8575,7 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
         # SEGMENTATION + TRUTH_CATALOG), gated by output.save_fits.
         if CONFIG.get('output', {}).get('save_fits', False):
             try:
-                from src.fits_export import (
+                from prism.io.fits_export import (
                     compute_noise_sigma_maps, compute_segmentation_map, write_lens_fits
                 )
                 band_noise_cfgs = field_info.get('band_noise_cfgs', {}) if field_info else {}
@@ -8514,7 +8666,7 @@ def save_outputs_complete(lens_id, images, out_root, row, n_lens_used, field_inf
     
     # Get lens system class and create PRISM-formatted filename
     # Format: PRISM_lens_TYPE_ID.jpg
-    from src.lens_system_classifier import LensSystemClassifier
+    from prism.lensing.lens_system_classifier import LensSystemClassifier
     lens_system_class = field_info.get('lens_system_class', 'single_field')
     short_code = LensSystemClassifier.get_short_code(lens_system_class)
     base = f"PRISM_lens_{short_code}_{int(lens_id):06d}"
@@ -8847,7 +8999,19 @@ def read_combined_cosmos_catalogs(structural_path, analysis_path=None):
     lens_base = phot.get('lens_base_mag_zero', 21.0) + phot.get('lens_redshift_log_slope', 0.8) * np.log10(np.clip(z_lens, 0.2, 6.0))
     lens_scatter = np.random.normal(0, 1.2, base_len)
 
-    source_base = phot.get('source_base_mag', 20.5)
+    # source_base_mag is calibrated at a reference redshift; without a
+    # distance-modulus term, sources at very different z_source all get the
+    # same apparent brightness, which is unphysical -- a real galaxy of
+    # fixed absolute luminosity gets fainter with distance. Apply
+    # Delta(distmod) relative to the reference z so the config's calibrated
+    # base magnitude is preserved at that z, and sources at higher/lower z
+    # are dimmed/brightened accordingly (~1.5-2 mag across z=1-3).
+    _src_mag_ref_z = float(phot.get('source_base_mag_ref_z', 2.0))
+    _distmod_ref = COSMO.distmod(_src_mag_ref_z).value
+    _distmod_src = COSMO.distmod(np.clip(z_source.to_numpy(), 0.1, 10.0)).value
+    source_distmod_offset = _distmod_src - _distmod_ref
+
+    source_base = phot.get('source_base_mag', 20.5) + source_distmod_offset
     mag_diff = np.random.uniform(phot.get('source_mag_diff_min', 1.5), phot.get('source_mag_diff_max', 5.0), base_len)
     source_scatter = np.random.normal(0, 0.8, base_len)
 
@@ -8855,7 +9019,10 @@ def read_combined_cosmos_catalogs(structural_path, analysis_path=None):
 
     # Per-band colour: convolve each galaxy's SED with the active telescope's
     # filter transmission curves. Reference band = first configured band.
-    sed_rng = np.random.default_rng()
+    # FIX (audit C-5): see the identical fix applied to the `if rng is
+    # None: rng = default_rng()` fallback pattern above -- bare
+    # default_rng() ignores args.seed.
+    sed_rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
     ref_band = UPPER_BANDS[0] if UPPER_BANDS else 'F150W'
 
     def _per_band_colors(morph_type, n_sersic, redshift):
@@ -9059,11 +9226,24 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
         epoch_index = int(epoch_match.group(1)) if epoch_match else None
         
         # Create minimal row dict for unified save
+        # FIX (adversarial audit finding C-2, 2026-08-01): this used to drop
+        # every field except theta_E/redshifts, silently discarding
+        # theta_E_override_applied/theta_E_pre_override/lens_sigma_kms/
+        # shear_gamma1/shear_gamma2 even though row_data (the actual
+        # mutated row from simulate_complete_lens_system_with_real_fields)
+        # carried them correctly -- so the *value* of theta_E was fixed but
+        # the diagnostic override flag and kinematic labels were still
+        # lost at this specific call site.
         row = {
             'lens_id': lens_id,
             'theta_E': row_data.get('theta_E', 0.0),
             'lens_redshift': row_data.get('lens_redshift', 0.0),
             'source_redshift': row_data.get('source_redshift', 0.0),
+            'theta_E_override_applied': row_data.get('theta_E_override_applied', False),
+            'theta_E_pre_override': row_data.get('theta_E_pre_override', None),
+            'lens_sigma_kms': row_data.get('lens_sigma_kms', None),
+            'shear_gamma1': row_data.get('shear_gamma1', None),
+            'shear_gamma2': row_data.get('shear_gamma2', None),
         }
         
         # Add time-delay metadata if present
@@ -9285,23 +9465,24 @@ def create_jwst_rgb(images, bands=None, telescope=None, arc_images=None):
                     if b in arc_residual:
                         imgs[b] = imgs[b] + arc_boost * arc_residual[b]
             if use_trilogy:
-                try:
-                    from src.euclid_trilogy_rgb import (
-                        create_euclid_trilogy_rgb, trilogy_params_from_config,
-                    )
-                except ImportError:
-                    from prism.telescopes.euclid_trilogy_rgb import (
-                        create_euclid_trilogy_rgb, trilogy_params_from_config,
-                    )
+                # FIX (adversarial audit finding C-9, 2026-08-01): this
+                # try/except order was INVERTED -- it tried `src.X` (which
+                # silently resolves to the SIBLING dev repo's file via the
+                # shared `src` namespace package, since both repos happen
+                # to be on sys.path) FIRST, only falling back to this
+                # package's own prism.telescopes.euclid_trilogy_rgb if
+                # that failed. Since the sibling repo's file exists and
+                # imports fine, this package was unconditionally executing
+                # unversioned code from a different git repository.
+                from prism.telescopes.euclid_trilogy_rgb import (
+                    create_euclid_trilogy_rgb, trilogy_params_from_config,
+                )
                 return create_euclid_trilogy_rgb(
                     imgs, **trilogy_params_from_config(
                         CONFIG if isinstance(CONFIG, dict) else {}
                     )
                 )
-            try:
-                from src.euclid_eummy_rgb import create_euclid_eummy_rgb, eummy_params_from_config
-            except ImportError:
-                from prism.telescopes.euclid_eummy_rgb import create_euclid_eummy_rgb, eummy_params_from_config
+            from prism.telescopes.euclid_eummy_rgb import create_euclid_eummy_rgb, eummy_params_from_config
             return create_euclid_eummy_rgb(imgs, **eummy_params_from_config(
                 CONFIG if isinstance(CONFIG, dict) else {}
             ))
@@ -9887,8 +10068,25 @@ Example usage:
         print("[CONFIG] WARNING: time_delays not found in CONFIG - time delays will be disabled")
 
     # Initialize global random state
+    #
+    # FIX (adversarial audit finding C-5, 2026-08-01): args.seed only ever
+    # seeded this local `rng` object. But read_combined_cosmos_catalogs()
+    # and numerous other functions draw from the GLOBAL, UNSEEDED
+    # np.random.* stream (54 call sites) and from bare, OS-entropy-seeded
+    # np.random.default_rng() calls -- both completely ignore args.seed.
+    # Confirmed by execution: two identical calls to
+    # read_combined_cosmos_catalogs() in one process returned different
+    # theta_E (2.741 vs 3.091). Seeding the global legacy np.random state
+    # here makes every remaining `np.random.X(...)` call in the module
+    # deterministic *given a fixed call order*, which is the best
+    # available fix without threading `rng` through 54+ call sites (a much
+    # larger refactor deferred; see PROJECT_NOTES). This does not, by
+    # itself, fix the bare `np.random.default_rng()` calls at various
+    # per-galaxy/per-band sites (those still draw fresh OS entropy each
+    # time) -- those are patched individually below via _seeded_rng().
+    np.random.seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    print(f"✓ Random seed: {args.seed}")
+    print(f"✓ Random seed: {args.seed} (global np.random legacy state seeded too)")
     
     # STEP 1: Input validation and path setup
     print("\nSTEP 1: Input Validation")

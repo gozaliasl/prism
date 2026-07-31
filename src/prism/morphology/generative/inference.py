@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.galaxy_morphology.generative.dataset import COND_DIM, STAMP_SIZE, condition_vector
-from src.galaxy_morphology.generative.model import ConditionalVAE
+from prism.morphology.generative.dataset import COND_DIM, STAMP_SIZE, condition_vector
+from prism.morphology.generative.model import ConditionalVAE
 
 DEFAULT_CHECKPOINT = Path(__file__).parent / "checkpoints" / "cvae_v2.pt"
 
