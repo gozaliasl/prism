@@ -39,7 +39,20 @@ JWST_PARAMS = {
     # Brighter-fatter coefficient  Δr²/flux  [pix² per e-]
     'bfe_alpha': 4.0e-7,
     # Non-linearity polynomial coefficients  (response relative to linear)
-    # DN_true = c0*DN + c1*DN² + c2*DN³   (c0≈1, c1,c2 from ground cal)
+    # CLARIFIED 2026-08-01 (adversarial audit finding C-16): this comment
+    # previously read "DN_true = c0*DN + c1*DN^2 + ..." which is the
+    # CORRECTION-direction convention (raw measured -> linearized true
+    # signal, as published in calibration reference files) -- but
+    # _apply_nonlinearity() below applies these coefficients in the
+    # FORWARD direction (true electrons -> measured/compressed response),
+    # which is what a forward simulator needs. The actual numeric values
+    # here (c1<0, producing sub-linear/compressive response at high flux
+    # when applied forward, matching real detector saturation behavior)
+    # are self-consistent with the forward application as implemented --
+    # only the comment's formula direction was mislabeled. If these
+    # specific coefficients are ever replaced with values copied directly
+    # from a published CORRECTION-convention calibration file, they must
+    # be re-derived/sign-adjusted for forward use first.
     'nl_coeffs': [1.0, -1.2e-6, 5.0e-13],
     # Full-well / saturation in electrons
     'full_well': 83_000,          # H2RG SW measured median

@@ -598,7 +598,17 @@ def field_galaxy_count_target(numpix, pixel_scale, env_params, config=None):
     if density_per_arcmin2 > 0:
         fov_arcmin2 = (numpix * pixel_scale / 60.0) ** 2
         richness_mult = env_params.get("galaxy_count_mean", 2.5) / 2.5
-        mean = density_per_arcmin2 * overdensity_factor * fov_arcmin2 * richness_mult
+        # FIX (adversarial audit finding C-12, 2026-08-01): the overdensity
+        # factor was applied unconditionally to EVERY environment type,
+        # including "isolated_field" -- so a lens explicitly labelled
+        # isolated was still rendered in a systematically overdense
+        # sightline, contradicting its own label. The overdensity signal
+        # (measured relative to a random field sightline) should only
+        # apply when the environment is richer than the isolated_field
+        # reference (richness_mult>1, i.e. group/pair); isolated_field
+        # itself IS the reference population, not an overdense one.
+        _effective_overdensity = overdensity_factor if richness_mult > 1.0 else 1.0
+        mean = density_per_arcmin2 * _effective_overdensity * fov_arcmin2 * richness_mult
         std = mean * 0.25  # ~25% field-to-field scatter (Poisson + clustering)
         return mean, std
 
@@ -2921,17 +2931,48 @@ def cosmos_field_galaxy_properties(mag_limit, catalog_path="data/galaxy_catalog.
 
 
 def sample_cosmos_field_galaxies(rng, n, x_positions, y_positions, mag_limit=27.5,
-                                  catalog_path="data/galaxy_catalog.fits"):
+                                  catalog_path="data/galaxy_catalog.fits",
+                                  group_target_z=None, group_z_fraction=0.0,
+                                  group_z_window=0.05):
     """Bootstrap-resample ``n`` real COSMOS-Web galaxies (with replacement) and
     place them at the given (already-sampled) positions, inheriting their real
     measured size, axis ratio, Sersic index, magnitude (all 4 JWST bands) and
     photometric redshift. Falls back to None if the catalog is unavailable.
+
+    group_target_z / group_z_fraction / group_z_window: FIX (adversarial
+    audit finding C-12, 2026-08-01). Previously field galaxies were an
+    UNCONDITIONAL bootstrap over the whole catalog regardless of the
+    lens's environment label -- a lens explicitly classified "group"
+    still had field-galaxy redshifts entirely uncorrelated with the
+    lens's own redshift (i.e. no actual group at any redshift was ever
+    rendered, only an isolated lens with a richer, but still
+    field-redshift-distributed, background/foreground population). When
+    group_z_fraction>0, that fraction of the n galaxies is preferentially
+    drawn from real catalog galaxies within +/-group_z_window of
+    group_target_z (the lens redshift) -- i.e. real, physically-plausible
+    group members -- while the remainder is still a normal field
+    bootstrap (real lens/group fields DO also contain unrelated line-of-
+    sight interlopers, so 100% group-redshift membership would itself be
+    unrealistic).
     """
     props = cosmos_field_galaxy_properties(mag_limit, catalog_path)
     if props is None or n <= 0:
         return None
 
-    idx = rng.integers(0, len(props["mag_f115w"]), size=n)
+    if group_target_z is not None and group_z_fraction > 0:
+        n_group = int(round(n * group_z_fraction))
+        n_field = n - n_group
+        near_mask = np.abs(props["redshift"] - group_target_z) < group_z_window
+        near_idx_pool = np.nonzero(near_mask)[0]
+        if len(near_idx_pool) > 0 and n_group > 0:
+            idx_group = rng.choice(near_idx_pool, size=n_group, replace=True)
+            idx_field = rng.integers(0, len(props["mag_f115w"]), size=n_field)
+            idx = np.concatenate([idx_group, idx_field])
+            rng.shuffle(idx)
+        else:
+            idx = rng.integers(0, len(props["mag_f115w"]), size=n)
+    else:
+        idx = rng.integers(0, len(props["mag_f115w"]), size=n)
     field_galaxies = []
     for i, src_i in enumerate(idx):
         q_ratio = float(np.clip(props["axis_ratio"][src_i], 0.05, 1.0))
@@ -2981,7 +3022,8 @@ def sample_cosmos_field_galaxies(rng, n, x_positions, y_positions, mag_limit=27.
     return field_galaxies
 
 
-def generate_synthetic_field_population(rng, n_field, numpix, pixel_scale=None):
+def generate_synthetic_field_population(rng, n_field, numpix, pixel_scale=None,
+                                         env_type=None, lens_z=None):
     """Generate a field galaxy population for when no lens-specific real field
     catalog is available.
 
@@ -2994,6 +3036,13 @@ def generate_synthetic_field_population(rng, n_field, numpix, pixel_scale=None):
     matching the 1-D number density and reinventing everything else from
     independent parametric guesses. Falls back to the latter only if the
     catalog can't be loaded.
+
+    env_type/lens_z: when env_type=="group", ~40% of the population is
+    preferentially drawn from real catalog galaxies near lens_z (see
+    sample_cosmos_field_galaxies's group_target_z/group_z_fraction), so a
+    lens actually labelled "group" renders an actual redshift-clustered
+    group, not just a richer field population with uncorrelated redshifts
+    (adversarial audit finding C-12, 2026-08-01).
     """
     if pixel_scale is None:
         pixel_scale = CONFIG.get('pixel_scale', 0.031) if isinstance(CONFIG, dict) else 0.031
@@ -3058,7 +3107,11 @@ def generate_synthetic_field_population(rng, n_field, numpix, pixel_scale=None):
         catalog_path = 'data/galaxy_catalog.fits'
     x_arr = [p[0] for p in positions]
     y_arr = [p[1] for p in positions]
-    field_galaxies = sample_cosmos_field_galaxies(rng, n_field, x_arr, y_arr, mag_limit, catalog_path)
+    _group_z_frac = 0.4 if (env_type == 'group' and lens_z is not None) else 0.0
+    field_galaxies = sample_cosmos_field_galaxies(
+        rng, n_field, x_arr, y_arr, mag_limit, catalog_path,
+        group_target_z=lens_z, group_z_fraction=_group_z_frac,
+    )
 
     if field_galaxies is not None:
         print(f"[INFO] Generated {len(field_galaxies)} field galaxies (bootstrap-resampled from COSMOS-Web)")
@@ -4415,11 +4468,34 @@ def create_jwst_band_configs(rng=None, use_distribution=True):
     for band in UPPER_BANDS:
         noise = noise_samples[band]
         
-        # Pick up per-telescope ZP from telescope_configs if set there
+        # Pick up per-telescope ZP from telescope_configs if set there.
+        #
+        # FIX (adversarial audit finding C-11, 2026-08-01): this used to
+        # apply ONE scalar magnitude_zero_point to every band (F115W,
+        # F150W, F277W, F444W all got 28.09), so the mag->flux conversion
+        # carried no filter-dependent throughput information at all -- all
+        # colour in the output came only from the synthetic SED offsets
+        # applied elsewhere, while the *overall* photometric zeropoint was
+        # identical across bands (unphysical: NIRCam's per-filter
+        # zeropoints genuinely differ with throughput/bandwidth).
+        #
+        # Approximate published NIRCam AB zeropoints (STScI JDox pipeline
+        # reference values, imaging mode, e-/s -> AB mag); these are
+        # DEFAULT/PLACEHOLDER values good to ~0.1-0.3 mag -- verify against
+        # the current jwst_pipeline CRDS reference files before using for
+        # precision photometric science, and override via
+        # telescope_configs.<band>.magnitude_zero_point in config if exact
+        # per-visit calibration values are available.
+        _default_band_zp = {
+            'F115W': 25.68, 'F150W': 25.97, 'F277W': 26.63, 'F444W': 26.32,
+        }
         _tel_name_bc = CONFIG.get('telescope', 'jwst').lower()
         _tel_cfg_bc  = CONFIG.get('telescope_configs', {}).get(_tel_name_bc, {})
-        _zp = float(_tel_cfg_bc.get('magnitude_zero_point',
-                    CONFIG.get('magnitude_zero_point', 28.09)))
+        _band_zp_cfg = _tel_cfg_bc.get('band_zero_points', {})
+        _zp = float(_band_zp_cfg.get(band,
+                    _default_band_zp.get(band,
+                    _tel_cfg_bc.get('magnitude_zero_point',
+                    CONFIG.get('magnitude_zero_point', 28.09)))))
 
         configs[band] = {
             "pixel_scale": float(CONFIG.get('pixel_scale', 0.031)),
@@ -5862,12 +5938,33 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             except Exception:
                 pass
     
+    # FIX (adversarial audit finding C-10, 2026-08-01): the lens LIGHT
+    # ellipticity used to be bit-identical to the lens MASS ellipticity
+    # (same e1_l/e2_l passed to both the SIE mass model and this light
+    # profile). Real ETG lenses show genuine mass/light misalignment --
+    # SLACS measurements find mass is typically rounder than light by
+    # ~0.05-0.1 in axis ratio, with position-angle misalignment of order
+    # 5-15 deg (e.g. Gomer & Williams 2020; Bruderer+2016 on SLACS/BELLS
+    # mass-light alignment) -- this is real, unmodelled physical
+    # uncertainty in real lens analyses, not a nuisance parameter. Add a
+    # modest, physically-motivated q/PA offset so the light profile is
+    # not a perfect, unrealistically-informative proxy for the mass
+    # model's exact orientation.
+    _dPA_light = float(rng.normal(0.0, 8.0))  # deg, ~SLACS-like scatter
+    _dq_light = float(np.clip(rng.normal(0.0, 0.06), -0.15, 0.15))
+    _lens_q_light = float(np.clip(ellipticity_to_axis_ratio(e1_l, e2_l) + _dq_light, 0.15, 0.98))
+    _lens_pa_light = lens_pa + _dPA_light
+    _e1_light, _e2_light = ellipticity(_lens_q_light, _lens_pa_light)
+    _e1_light, _e2_light = float(np.clip(_e1_light, -0.8, 0.8)), float(np.clip(_e2_light, -0.8, 0.8))
+    row["lens_light_pa_offset_deg"] = _dPA_light
+    row["lens_light_q_offset"] = _dq_light
+
     main_lens_light = dict(
         R_sersic=lens_radius,
         n_sersic=float(n_lens),
         center_x=0.0,
         center_y=0.0,
-        e1=float(e1_l), e2=float(e2_l)
+        e1=_e1_light, e2=_e2_light
     )
 
     # For binary/pair lens systems, the second mass clump must have a visible
@@ -5981,24 +6078,30 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                                             exclude_subhalos=_used_tng_subhalos,
                                             sfr_class=_src_sfr_class)
 
-        # Generate source radius from config-driven distribution
+        # FIX (adversarial audit finding C-6, 2026-08-01): source_radius
+        # used to be defined as theta_E * (a random fraction) -- i.e. the
+        # ANGULAR SIZE of a background galaxy at z_source~1.75 was a
+        # deterministic function of a FOREGROUND deflector's mass at
+        # z_lens~0.45. These are causally unrelated systems; the source's
+        # size should come from its own stellar mass and redshift via a
+        # size-mass relation, exactly like the TNG-mode branch below
+        # already does correctly for the matched-subhalo case. Using the
+        # same mass_size_relation()/convert_physical_to_angular_radius()
+        # pipeline here (instead of only for TNG mode) removes the
+        # circular theta_E dependency for the default/non-TNG path too,
+        # and stops an ML model from being able to infer theta_E directly
+        # from the source's apparent size (a pure shortcut in the old
+        # scheme).
         geo = CONFIG.get('geometry', {})
-        size_frac_mean = geo.get('source_fraction_mean', 0.12)
-        size_frac_sigma = geo.get('source_fraction_sigma', 0.45)
-        size_frac_min = geo.get('source_fraction_min', 0.02)
-        size_frac_max = geo.get('source_fraction_max', 0.4)
-        
-        # Sample size as fraction of Einstein radius (physical scaling)
-        size_fraction = np.clip(rng.lognormal(np.log(size_frac_mean), size_frac_sigma), 
-                               size_frac_min, size_frac_max)
-        base_source_radius = theta_E * size_fraction
-        
-        # Apply redshift size evolution: R(z) ~ R(0) * (1+z)^-1.2
-        size_evolution_factor = np.clip((1 + source_z)**(-1.2), 0.1, 1.0)
-        source_radius = base_source_radius * size_evolution_factor
-        
-        # Enforce physical constraint: source intrinsically smaller than lens
-        geo = CONFIG.get('geometry', {})
+        _src_reff_kpc = mass_size_relation(_source_logM, source_z, rng)
+        source_radius = convert_physical_to_angular_radius(_src_reff_kpc, source_z)
+
+        # Soft rendering-stability cap (NOT a physical constraint): an
+        # extremely large source relative to the lens light can produce
+        # degenerate/numerically awkward caustic-crossing geometry. This
+        # is a practical rendering safeguard, not a claim that real
+        # background sources cannot subtend more angular size than the
+        # foreground lens light.
         if geo.get('enforce_source_smaller_than_lens', True):
             max_ratio = geo.get('max_source_to_lens_ratio', 0.6)
             max_allowed = lens_radius * max_ratio
@@ -6043,12 +6146,21 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     phot = CONFIG['photometry']
     
     # Check if source will be visible (not too faint)
+    # FIX (adversarial audit finding C-13, 2026-08-01): faint sources were
+    # silently EDITED (brightened) to fit within source_mag_max rather
+    # than rejected -- this truncates the faint end of the rendered
+    # source luminosity function with a delta function at the limit, and
+    # was previously undetectable from the output alone. Now flagged in
+    # `row` so it's recorded in saved metadata and can be filtered out of
+    # any luminosity-function/population-statistics use of the dataset.
+    row["source_mag_brightening_applied"] = False
     for band in LOWER_BANDS:
         src_mag = float(row.get(f"source_mag_{band}", 20.5))
         if src_mag > phot.get('source_mag_max', 25.0):
             print(f"[WARNING] Source too faint in {band}: {src_mag:.2f}")
             # Adjust source to be brighter
             row[f"source_mag_{band}"] = phot.get('source_mag_max', 25.0) - 0.5
+            row["source_mag_brightening_applied"] = True
     
     # v17 caustic multiplicity gate: source must be INSIDE the tangential caustic
     # (min_mu ≤ |μ| ≤ max_mu) to produce multiple images / arcs.
@@ -6091,6 +6203,26 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         row["source_x"] = _src_x_safe
         row["source_y"] = _src_y_safe
         print(f"[CAUSTIC] lens_id={row.get('lens_id','?')} mu={_mu_raw:.1f} outside [{_min_mu},{_max_mu}] -> resampled ({_src_x_safe:.3f},{_src_y_safe:.3f})")
+
+    # FIX (adversarial audit finding C-13, 2026-08-01): the selection
+    # function (magnification gate [min_mu, max_mu], and whether this
+    # particular source position had to be resampled to satisfy it) was
+    # applied but never recorded -- so nothing in the saved output let a
+    # population-statistics user know the sample excludes the mu<min_mu
+    # regime that dominates REAL galaxy-galaxy lens samples (typical
+    # mu~2-5), biasing any magnification-distribution claim without a
+    # way to detect or correct for it after the fact.
+    try:
+        _mu_final = abs(float(_mm.magnification(
+            float(row.get("source_x", row.get("xs", 0))),
+            float(row.get("source_y", row.get("ys", 0))),
+            kwargs_lens)))
+    except Exception:
+        _mu_final = _mu_raw
+    row["magnification"] = float(_mu_final)
+    row["magnification_gate_min"] = float(_min_mu)
+    row["magnification_gate_max"] = float(_max_mu)
+    row["source_position_resampled_for_caustic"] = bool(_needs_resample)
 
     lensed_source = dict(
         R_sersic=source_radius,
@@ -6286,10 +6418,11 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         # Large-FOV mode: generate synthetic population spread across full image
         _pix_scale = CONFIG.get('pixel_scale', 0.031) if isinstance(CONFIG, dict) else 0.031
         field_galaxies_base = generate_synthetic_field_population(
-            rng, n_field_env, numpix, pixel_scale=_pix_scale)
+            rng, n_field_env, numpix, pixel_scale=_pix_scale, env_type=env_type, lens_z=lens_z)
         print(f"[INFO] Large-FOV synthetic field: {len(field_galaxies_base)} galaxies over {numpix*_pix_scale:.0f}\"")
     else:
-        field_galaxies_base = generate_synthetic_field_population(rng, max(n_field_env, 2), numpix)
+        field_galaxies_base = generate_synthetic_field_population(
+            rng, max(n_field_env, 2), numpix, env_type=env_type, lens_z=lens_z)
         print(f"[INFO] Using synthetic field galaxies for {env_type} environment")
 
     apply_tng_field_overrides(field_galaxies_base, rng, CONFIG, exclude_subhalos=_used_tng_subhalos)
@@ -6783,6 +6916,13 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
 
         except Exception as e:
             print(f"[ERROR] Band {b} simulation failed: {e}")
+            # FIX (adversarial audit finding C-16, 2026-08-01): a fabricated
+            # near-empty fallback image used to be substituted silently,
+            # indistinguishable downstream from a real successful render
+            # with a normal "is_lens" label. Flag it so this system can be
+            # excluded from any downstream science/ML use.
+            row["band_render_failed"] = True
+            row.setdefault("band_render_failed_bands", []).append(b)
             fallback = rng.exponential(1e-8, (numpix, numpix))
             center = numpix // 2
             fallback[center-12:center+12, center-12:center+12] += 5e-7
@@ -6844,6 +6984,37 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             exposure_time = float(CONFIG.get('exposure_time', 1028.0))
 
             if DETECTOR_CHAIN_AVAILABLE and _det_enabled:
+                # FIX (adversarial audit finding C-8.2, 2026-08-01; this
+                # exact bug was ALREADY diagnosed and its fix specified in
+                # analysis/sim_obs_comparison/reports/phase1_real_vs_sim_comparison.md
+                # dated 2026-06-12, but never implemented -- that report
+                # measured the sim background RMS at 6x too low vs real
+                # COSMOS-Web data because DetectorChain.apply() has no sky
+                # term: Poisson shot noise was only ever computed on
+                # source+dark signal, then a separate additive Gaussian
+                # (add_sky_background_noise, post-chain) was used as a
+                # stopgap to match the target RMS -- which gets the total
+                # noise AMPLITUDE roughly right but not its physical
+                # origin (no sqrt(signal+SKY+dark) scaling, no interaction
+                # with saturation/ADC/PRNU for the sky component).
+                #
+                # Implemented here: inject the sky flux level into the
+                # image BEFORE the chain runs (so Poisson/saturation/PRNU
+                # all see signal+sky together, exactly as the report's
+                # "Next Steps" #1 specifies), then subtract the same mean
+                # back out afterward (sky-subtracted convention, matching
+                # what downstream code already expects from
+                # add_sky_background_noise's zero-mean-noise-only output).
+                # bg_level is derived from the empirically-calibrated
+                # bg_rms via the inverse Poisson relation when not
+                # explicitly configured (bg_rms = sqrt(bg_level*t_exp)/t_exp
+                # => bg_level = bg_rms^2 * t_exp).
+                _bg_rms_b = float(band_cfgs.get(b, {}).get('_bg_rms', 0.0))
+                _bg_level_b = float(band_cfgs.get(b, {}).get('_bg_level', 0.0))
+                if _bg_level_b <= 0.0 and _bg_rms_b > 0.0 and exposure_time > 0:
+                    _bg_level_b = (_bg_rms_b ** 2) * exposure_time
+                _image_plus_sky = images[b] + _bg_level_b if _bg_level_b > 0 else images[b]
+
                 # Full physically-realistic detector chain
                 chain = make_detector_chain(
                     telescope=_tel_name,
@@ -6855,11 +7026,18 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                     seed_prnu=_prnu_seed,
                     enabled=_det_overrides if _det_overrides else None,
                 )
-                final_image = chain.apply(images[b])
+                final_image = chain.apply(_image_plus_sky)
                 if _det_overrides.get('persistence', chain.enabled.get('persistence', False)):
                     _persistence_carry = chain.make_persistence_map(final_image)
-                final_image = add_sky_background_noise(final_image, b, rng, band_cfgs)
-                print(f"[DET] Applied {_tel_name} detector chain to {b}")
+                if _bg_level_b > 0:
+                    final_image = final_image - _bg_level_b
+                else:
+                    # No sky level available to inject (bg_rms not
+                    # configured either) -- fall back to the old additive-
+                    # noise-only approximation so behavior degrades
+                    # gracefully rather than silently losing all sky noise.
+                    final_image = add_sky_background_noise(final_image, b, rng, band_cfgs)
+                print(f"[DET] Applied {_tel_name} detector chain to {b} (sky flux {'injected pre-chain' if _bg_level_b>0 else 'NOT available, using post-hoc approximation'})")
             else:
                 # Fallback: legacy lenstronomy noise model
                 cfg = dict(band_cfgs[b])
@@ -6881,11 +7059,15 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
 
         except Exception as e:
             print(f"[ERROR] Band {b} simulation failed: {e}")
+            # FIX (audit C-16): flag fabricated fallback, see identical
+            # fix above.
+            row["band_render_failed"] = True
+            row.setdefault("band_render_failed_bands", []).append(b)
             fallback = rng.exponential(1e-8, (numpix, numpix))
             center = numpix // 2
             fallback[center-12:center+12, center-12:center+12] += 5e-7
             images[b] = fallback.astype(np.float32)
-    
+
     # Classify lens system
     from prism.lensing.lens_system_classifier import LensSystemClassifier
     lens_system_class = LensSystemClassifier.classify_lens(lens_model_list, kwargs_lens)
@@ -8001,6 +8183,18 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
             exposure_time = float(CONFIG.get('exposure_time', 1028.0))
 
             if DETECTOR_CHAIN_AVAILABLE and _det_enabled_nl:
+                # FIX (audit C-8.2): see identical fix + rationale on the
+                # lens-system render path above -- inject sky flux before
+                # the chain so Poisson noise is physically correct, matched
+                # to the non-lens (negative-class) images too so the two
+                # classes don't end up with systematically different noise
+                # statistics (which would itself be an ML shortcut risk).
+                _bg_rms_b = float(band_cfgs.get(b, {}).get('_bg_rms', 0.0))
+                _bg_level_b = float(band_cfgs.get(b, {}).get('_bg_level', 0.0))
+                if _bg_level_b <= 0.0 and _bg_rms_b > 0.0 and exposure_time > 0:
+                    _bg_level_b = (_bg_rms_b ** 2) * exposure_time
+                _image_plus_sky = images[b] + _bg_level_b if _bg_level_b > 0 else images[b]
+
                 chain = make_detector_chain(
                     telescope=_tel_name_nl,
                     band=b,
@@ -8010,8 +8204,11 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
                     seed_prnu=_prnu_seed_nl,
                     enabled=_det_overrides_nl if _det_overrides_nl else None,
                 )
-                final_image = chain.apply(images[b])
-                final_image = add_sky_background_noise(final_image, b, rng, band_cfgs)
+                final_image = chain.apply(_image_plus_sky)
+                if _bg_level_b > 0:
+                    final_image = final_image - _bg_level_b
+                else:
+                    final_image = add_sky_background_noise(final_image, b, rng, band_cfgs)
             else:
                 cfg = dict(band_cfgs[b])
                 cfg['pixel_scale'] = float(pixel_scale)
@@ -8437,8 +8634,16 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
                 gray = normalize_for_display_astronomical(images[active_bands[0]], noise_level=0.3, sat_percent=0.01)
                 rgb = np.stack([gray, gray, gray], axis=-1)
             if rgb is not None:
-                # Store pure RGB as uint8 in npz (saves 4x space)
-                data_dict['rgb_visualization'] = (rgb * 255).astype(np.uint8)
+                # Store pure RGB as uint8 in npz (saves 4x space).
+                # FIX (adversarial audit finding C-7, 2026-08-01): renamed
+                # from 'rgb_visualization' to 'display_rgb_visualization'
+                # -- this is a per-image adaptively-stretched (arcsinh,
+                # data-dependent percentile normalization), NON-physical,
+                # display-only composite, stored alongside the real
+                # calibrated science arrays (image_final etc.) in the same
+                # archive with no prior naming cue that it must not be
+                # used as model input or for photometric measurement.
+                data_dict['display_rgb_visualization'] = (rgb * 255).astype(np.uint8)
 
             # Save panel (bands + RGB) as the final JPG — consistent with intermediate images
             save_img = panel if panel is not None else rgb
@@ -8453,11 +8658,25 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
         # 4. Optional stacked .npy output (steps x 5 channels)
         stacked_cfg = CONFIG.get('output', {}).get('stacked_npy', {})
         if stacked_cfg.get('enabled', False):
+            # FIX (adversarial audit finding C-7, 2026-08-01): this used to
+            # interleave a display-only "rgb_gray" channel (NTSC luma of an
+            # adaptively per-image-normalized asinh/arcsinh RGB composite,
+            # with no physical units and a data-dependent, non-reproducible
+            # scale) directly into the SAME homogeneous float32 science
+            # tensor as the real per-band calibrated images, with no
+            # channel manifest -- a downstream consumer slicing this array
+            # by index had no way to know one channel per step was not a
+            # real filter. Now: the per-band science stack (channel_names
+            # recorded) and the display-only luma channel are saved to
+            # SEPARATE arrays, and the display channel is clearly
+            # namespaced `display_*`.
             steps_order = stacked_cfg.get(
                 'order',
                 ['lens_only', 'sources_only', 'sources_unlensed', 'lens_sources', 'field_only', 'final']
             )
             stacked_channels = []
+            display_channels = []
+            channel_names = []
 
             def _rgb_gray(step_imgs):
                 step_rgb = create_jwst_rgb(step_imgs, bands=active_bands)
@@ -8484,12 +8703,16 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
                     rgb_gray = np.zeros((1,) + images[active_bands[0]].shape, dtype=np.float32)
 
                 stacked_channels.append(bands_stack)
-                stacked_channels.append(rgb_gray)
+                display_channels.append(rgb_gray)
+                channel_names.extend(f"{step}_{b}" for b in active_bands)
 
             stacked = np.concatenate(stacked_channels, axis=0).astype(np.float32)
+            display_stack = np.concatenate(display_channels, axis=0).astype(np.float32)
             stacked_dir = out_root / "unified_npy"
             stacked_dir.mkdir(parents=True, exist_ok=True)
             np.save(stacked_dir / f"{base}.npy", stacked)
+            np.save(stacked_dir / f"{base}_channel_names.npy", np.array(channel_names))
+            np.save(stacked_dir / f"{base}_display_rgb_luma.npy", display_stack)
         
         # 4. Metadata
         meta = {
@@ -8516,6 +8739,19 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
                               if pd.notna(row.get('shear_gamma1', np.nan)) else None),
             'shear_gamma2': (float(row['shear_gamma2'])
                               if pd.notna(row.get('shear_gamma2', np.nan)) else None),
+            # Selection-function record (audit finding C-13): lets a
+            # population-statistics user identify/exclude systems where
+            # the source was force-brightened or force-repositioned to
+            # satisfy a rendering constraint, and see the magnification
+            # gate that was applied.
+            'magnification': (float(row['magnification'])
+                               if row.get('magnification') is not None else None),
+            'magnification_gate_min': (float(row['magnification_gate_min'])
+                                        if row.get('magnification_gate_min') is not None else None),
+            'magnification_gate_max': (float(row['magnification_gate_max'])
+                                        if row.get('magnification_gate_max') is not None else None),
+            'source_position_resampled_for_caustic': bool(row.get('source_position_resampled_for_caustic', False)),
+            'source_mag_brightening_applied': bool(row.get('source_mag_brightening_applied', False)),
         }
         
         if epoch_index is not None:
@@ -9244,6 +9480,11 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
             'lens_sigma_kms': row_data.get('lens_sigma_kms', None),
             'shear_gamma1': row_data.get('shear_gamma1', None),
             'shear_gamma2': row_data.get('shear_gamma2', None),
+            'magnification': row_data.get('magnification', None),
+            'magnification_gate_min': row_data.get('magnification_gate_min', None),
+            'magnification_gate_max': row_data.get('magnification_gate_max', None),
+            'source_position_resampled_for_caustic': row_data.get('source_position_resampled_for_caustic', False),
+            'source_mag_brightening_applied': row_data.get('source_mag_brightening_applied', False),
         }
         
         # Add time-delay metadata if present

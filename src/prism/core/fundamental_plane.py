@@ -48,12 +48,25 @@ FJ_M_STAR_AB      = -22.0
 FJ_SLOPE          = 0.25   # σ ∝ L^{0.25}
 
 # ---------------------------------------------------------------------------
-# Mass-sigma calibration  (Cappellari+2013 ATLAS3D; Zahid+2016 for high-z)
+# Mass-sigma calibration  (Zahid+2016 ETG M*-sigma relation)
 #   log σ = MASS_SIGMA_SLOPE · (log M★ − 11) + log σ_ref
-# ATLAS3D slope 0.32 better reproduces σ~300 km/s for logM~12 ETG lenses
-# than the Fall & Romanowsky (2013) slope of 0.27.
+#
+# CORRECTED 2026-08-01 (adversarial audit finding C-11/C-15): the previous
+# slope=0.32 was justified by a comment claiming it "reproduces σ~300 km/s
+# for logM~12 ETG lenses" -- that claim is arithmetically false: slope=0.32
+# gives 200*10^(0.32*1.0) = 418 km/s at logM=12, not 300 (and the slope=0.27
+# alternative the comment rejected also overshoots, at 373 km/s). Measured
+# consequence in production use: for logM*=11.75-11.95 (this project's
+# group-scale showcase mass range), the FP path returned mean sigma=376
+# km/s, well above real massive ETGs (~260-300 km/s at that mass), which
+# then over-inflates theta_E via theta_E ~ sigma^2. slope=0.20 (closer to
+# the ETG M*-sigma relations in Zahid et al. 2016, ApJ 832, 203) gives
+# 200*10^(0.20*1.0) ~= 317 km/s at logM=12, and ~296 km/s at logM=11.85 --
+# consistent with real massive ETG lens samples (SLACS/BELLS/Q1 sigma_v
+# typically 200-330 km/s per this project's own
+# lens_source_gap_distributions.py measurements).
 # ---------------------------------------------------------------------------
-MASS_SIGMA_SLOPE = 0.32
+MASS_SIGMA_SLOPE = 0.20
 MASS_SIGMA_REF   = 200.0   # km/s at log M★ = 11
 
 # SIS Einstein radius conversion
@@ -88,9 +101,10 @@ def sigma_from_mass(mass_log10: float, rng=None, scatter_dex: float = 0.05) -> f
     """
     Estimate velocity dispersion from stellar mass.
 
-    Uses Cappellari+2013 (ATLAS3D) calibration, slope 0.32, which better
-    reproduces observed σ for massive ETG lens galaxies (logM ~ 11–12)
-    than the shallower Fall & Romanowsky (2013) slope of 0.27.
+    Uses a Zahid+2016-consistent slope=0.20 calibration (corrected
+    2026-08-01; the previous slope=0.32 over-predicted sigma by ~25-30%
+    for massive ETG lens galaxies, logM ~ 11.5-12 -- see module-level
+    comment above).
 
     Parameters
     ----------
