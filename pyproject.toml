@@ -46,3 +46,8 @@ include = ["prism*"]
 
 [tool.setuptools.package-data]
 "prism.morphology" = ["*.yaml", "*.md"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: end-to-end tests that require a full prism-simulate render (run manually, not in CI)",
+]
