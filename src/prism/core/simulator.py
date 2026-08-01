@@ -10890,8 +10890,28 @@ Example usage:
                         else:
                             td_df.to_csv(time_delay_catalog_path, index=False)
                     
-                    # Create training record only for first epoch
-                    if epoch_idx == 0 and save_success:
+                    # Create training record only for first epoch.
+                    # FIX (discovered while closing adversarial-audit gap
+                    # C-21, 2026-08-01, by actually EXECUTING the
+                    # time-delay code path -- which the original static
+                    # audit never did): this condition used to be
+                    # `epoch_idx == 0`, but this code is OUTSIDE the
+                    # `for epoch_idx, ... in enumerate(epoch_results):`
+                    # loop above (same indentation as the `for` statement,
+                    # not nested inside it) -- so `epoch_idx` here is
+                    # Python's post-loop leftover value from the LAST
+                    # iteration (e.g. 3 for a 4-epoch system), never 0 for
+                    # any multi-epoch time-delay system. Confirmed by
+                    # execution: a 4-epoch time-delay run saved all 4
+                    # epoch .npz files successfully, but produced
+                    # "0 successful" lens records and
+                    # "ERROR: No training samples generated successfully"
+                    # -- the catalog/label pipeline silently produced
+                    # NOTHING for every time-delay system ever generated.
+                    # Fixed to key off first_epoch_metadata (correctly
+                    # captured for epoch 0 inside the loop) instead of the
+                    # stale loop variable.
+                    if first_epoch_metadata is not None and save_success:
                         # Use first_epoch_metadata if available, otherwise use current metadata
                         record_metadata = first_epoch_metadata if first_epoch_metadata else metadata
                         # Create comprehensive training record (first epoch only)
