@@ -1015,20 +1015,33 @@ BAND_CENTERS_UM = ALL_BAND_CENTERS_UM  # Will be subset by actual bands used
 #   bright (source) pixels in the RGB composite (1.0 = no enhancement).
 # - gamma: per-channel (R, G, B) gamma correction applied to the composite.
 TELESCOPE_RGB_PARAMS = {
+    # FIX (2026-08-01, user-reported): soft_clip=False (the old default for
+    # every telescope except Euclid) hard-zeroes any pixel below
+    # sigma_mult*noise_sigma in _rgb_composite_sky_subtract() -- this was
+    # silently erasing faint lensed-source arcs and faint galaxy outskirts
+    # from the RGB composite even though the same flux is clearly visible
+    # in the single-band panels (which use a different, non-thresholding
+    # normalization). soft_clip=True keeps a tapered fraction of sub-
+    # threshold flux instead of a hard zero, so faint real structure
+    # survives while pure background noise is still suppressed.
     'jwst':   dict(noise_level=0.30, sat_percent=0.01, sigma_mult=1.2, color_enhance=1.0,
-                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.35),
+                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.35,
+                   soft_clip=True),
     # Euclid default: Trilogy log stretch (Dan Coe) — clean paper-quality RGB on sims.
     # Override with output.rgb.use_eummy: true for Mischa Schirmer MER Lab look.
     'euclid': dict(noise_level=0.15, sat_percent=0.001, sigma_mult=1.2, color_enhance=1.0,
                    gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.25,
                    use_trilogy=True, use_eummy=False,
-                   soft_clip=False, band_style_stretch=False, field_overlay=False),
+                   soft_clip=True, band_style_stretch=False, field_overlay=False),
     'roman':  dict(noise_level=0.15, sat_percent=0.02, sigma_mult=1.2, color_enhance=1.35,
-                   gamma=(1.0, 1.0, 0.96), linked_stretch=True, arc_boost=0.45),
+                   gamma=(1.0, 1.0, 0.96), linked_stretch=True, arc_boost=0.45,
+                   soft_clip=True),
     'subaru': dict(noise_level=0.30, sat_percent=0.01, sigma_mult=1.2, color_enhance=1.0,
-                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.30),
+                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.30,
+                   soft_clip=True),
     'lsst':   dict(noise_level=0.30, sat_percent=0.01, sigma_mult=1.2, color_enhance=1.0,
-                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.30),
+                   gamma=(1.0, 1.0, 1.0), linked_stretch=True, arc_boost=0.30,
+                   soft_clip=True),
 }
 
 def get_telescope_bands(resolution_name, config_bands=None):
@@ -1071,7 +1084,11 @@ from prism.selection.galaxygenius_stamps import (  # noqa: E402
     native_redshift_for_stamp_set,
 )
 from prism.selection.tng_galaxy_selector import select_tng_galaxy, select_tng_galaxy_local, load_local_catalog, local_particle_path  # noqa: E402
-from prism.morphology.tng_particle_light import build_tng_particle_interpol_kwargs, get_projection_orientation  # noqa: E402
+from prism.morphology.tng_particle_light import (  # noqa: E402
+    build_tng_particle_interpol_kwargs, get_projection_orientation,
+    stellar_population_summary, stellar_population_summary_sersic_fallback,
+    stellar_population_spectrum, stellar_population_spectrum_sersic_fallback,
+)
 OMEGA_M = 0.3
 OMEGA_L = 0.7
 ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
@@ -6579,6 +6596,24 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             )]
             for b in UPPER_BANDS
         }
+        # Physical stellar-population summary (mass-weighted age/metallicity
+        # + full-SED apparent magnitudes across every band FSPS was
+        # integrated against) for the light that actually produced this
+        # render -- metadata only, not used in rendering itself.
+        _lens_pop_summary = stellar_population_summary(
+            _lens_particle_file, _tng_lens['halfmassrad_stars_kpc'],
+            magnitude_ref=lens_mag_by_band[_pref], ref_band=_pref, rng=rng)
+        row['lens_light_mass_weighted_age_gyr'] = _lens_pop_summary['mass_weighted_age_gyr']
+        row['lens_light_mass_weighted_metallicity_zsun'] = _lens_pop_summary['mass_weighted_metallicity_zsun']
+        for _b, _m in _lens_pop_summary['sed_mags'].items():
+            row[f'lens_light_sed_{_b}'] = _m
+        # Observed-frame flux spectrum (ML image->spectrum training /
+        # ground-truth line & redshift measurement) -- see
+        # stellar_population_spectrum()'s docstring for units/approximations.
+        row['_lens_light_spectrum'] = stellar_population_spectrum(
+            _lens_particle_file, _tng_lens['halfmassrad_stars_kpc'],
+            magnitude_ref=lens_mag_by_band[_pref], ref_band=_pref,
+            redshift=float(lens_z), rng=rng)
     elif (_particle_morph_cfg.get('generative_enabled', False)
           and _particle_morph_cfg.get('generative_force', False)
           and _particle_morph_cfg.get('lens_enabled', False)
@@ -6612,6 +6647,25 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             morph_seed=_lens_morph_seed,
             morph_type=_force_lens_morph,
         )
+        # Sersic-fallback FSPS SED (2026-08-01): when this lens has a TNG
+        # catalog match (even without a local particle cutout), attach the
+        # same age/metallicity/33-band-SED metadata as the particle path,
+        # using the TNG-matched galaxy's real metallicity + an sSFR-class
+        # age proxy instead of a true mass-weighted particle average -- see
+        # stellar_population_summary_sersic_fallback()'s docstring.
+        if _tng_lens is not None:
+            _pref = _particle_ref_band()
+            _lens_pop_summary = stellar_population_summary_sersic_fallback(
+                _tng_lens, magnitude_ref=lens_mag_by_band[_pref], ref_band=_pref)
+            if _lens_pop_summary is not None:
+                row['lens_light_mass_weighted_age_gyr'] = _lens_pop_summary['mass_weighted_age_gyr']
+                row['lens_light_mass_weighted_metallicity_zsun'] = _lens_pop_summary['mass_weighted_metallicity_zsun']
+                row['lens_light_age_method'] = _lens_pop_summary['age_method']
+                for _b, _m in _lens_pop_summary['sed_mags'].items():
+                    row[f'lens_light_sed_{_b}'] = _m
+                row['_lens_light_spectrum'] = stellar_population_spectrum_sersic_fallback(
+                    _tng_lens, stellar_mass_msun=10.0 ** float(_tng_lens['stellar_mass_logmsun']),
+                    magnitude_ref=lens_mag_by_band[_pref], ref_band=_pref, redshift=float(lens_z))
 
     # Optionally render the lensed source as a GalaxyGenius/SKIRT stamp
     # (INTERPOL light profile, ray-traced through the lens equation like any
@@ -6677,6 +6731,17 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             )]
             for b in UPPER_BANDS
         }
+        _src_pop_summary = stellar_population_summary(
+            _source_particle_file, _tng_source['halfmassrad_stars_kpc'],
+            magnitude_ref=src_mag_by_band[_pref], ref_band=_pref, rng=rng)
+        row['source_mass_weighted_age_gyr'] = _src_pop_summary['mass_weighted_age_gyr']
+        row['source_mass_weighted_metallicity_zsun'] = _src_pop_summary['mass_weighted_metallicity_zsun']
+        for _b, _m in _src_pop_summary['sed_mags'].items():
+            row[f'source_sed_{_b}'] = _m
+        row['_source_spectrum'] = stellar_population_spectrum(
+            _source_particle_file, _tng_source['halfmassrad_stars_kpc'],
+            magnitude_ref=src_mag_by_band[_pref], ref_band=_pref,
+            redshift=float(_src_z), rng=rng)
     elif (_particle_morph_cfg.get('generative_enabled', False)
           and _particle_morph_cfg.get('generative_force', False)
           and _particle_morph_cfg.get('source_enabled', False)
@@ -6706,6 +6771,22 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         source_fragment, source_kw_by_band, _ = gm_build_light_model(
             'source', lensed_source, src_mag_by_band, UPPER_BANDS, rng, CONFIG,
             morph_seed=_source_morph_seed)
+        # Sersic-fallback FSPS SED (2026-08-01) -- see the matching lens
+        # block above for the same age/metallicity/SED-source rationale.
+        if _tng_source is not None:
+            _pref = _particle_ref_band()
+            _src_pop_summary = stellar_population_summary_sersic_fallback(
+                _tng_source, magnitude_ref=src_mag_by_band[_pref], ref_band=_pref)
+            if _src_pop_summary is not None:
+                row['source_mass_weighted_age_gyr'] = _src_pop_summary['mass_weighted_age_gyr']
+                row['source_mass_weighted_metallicity_zsun'] = _src_pop_summary['mass_weighted_metallicity_zsun']
+                row['source_age_method'] = _src_pop_summary['age_method']
+                for _b, _m in _src_pop_summary['sed_mags'].items():
+                    row[f'source_sed_{_b}'] = _m
+                _src_z_fallback = float(row.get("source_redshift", row.get("zs", 2.0)))
+                row['_source_spectrum'] = stellar_population_spectrum_sersic_fallback(
+                    _tng_source, stellar_mass_msun=10.0 ** float(_tng_source['stellar_mass_logmsun']),
+                    magnitude_ref=src_mag_by_band[_pref], ref_band=_pref, redshift=_src_z_fallback)
 
     # Build light-model fragments for any additional (multi-source) lensed
     # sources sampled above. Uses the standard morphology path only (not the
@@ -8782,7 +8863,29 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
             'source_position_resampled_for_caustic': bool(row.get('source_position_resampled_for_caustic', False)),
             'source_mag_brightening_applied': bool(row.get('source_mag_brightening_applied', False)),
         }
-        
+
+        # Stellar-population summary from the FSPS SED upgrade (mass-weighted
+        # age/metallicity + full multi-telescope SED). Populated for both
+        # the TNG-particle path (real per-particle mass-weighted age,
+        # age_method absent/'mass_weighted_particles') and the Sersic
+        # fallback path with a TNG catalog match (sSFR-class age proxy,
+        # age_method='ssfr_class_proxy' -- see
+        # stellar_population_summary_sersic_fallback()'s docstring).
+        # Absent entirely for systems with no TNG match at all.
+        for _prefix in ('lens_light', 'source'):
+            _age_key = f'{_prefix}_mass_weighted_age_gyr'
+            _z_key = f'{_prefix}_mass_weighted_metallicity_zsun'
+            _method_key = f'{_prefix}_age_method'
+            if row.get(_age_key) is not None:
+                meta[_age_key] = float(row[_age_key])
+                meta[_z_key] = float(row[_z_key])
+                meta[_method_key] = row.get(_method_key, 'mass_weighted_particles')
+                _sed_prefix = f'{_prefix}_sed_' if _prefix == 'lens_light' else 'source_sed_'
+                meta[f'{_prefix}_sed_mags'] = {
+                    k[len(_sed_prefix):]: float(v) for k, v in row.items()
+                    if k.startswith(_sed_prefix)
+                }
+
         if epoch_index is not None:
             meta['epoch_index'] = epoch_index
 
@@ -8813,7 +8916,18 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
         # Store metadata as JSON string (npz doesn't handle dicts directly)
         import json
         data_dict['metadata'] = json.dumps(_to_jsonable(meta))
-        
+
+        # Observed-frame lens/source spectra (FSPS-derived, see
+        # tng_particle_light.stellar_population_spectrum{,_sersic_fallback})
+        # -- real per-system arrays, so these go in the npz array data, not
+        # the JSON metadata blob. Absent for systems with no TNG match at
+        # all (no age/metallicity information to build a spectrum from).
+        for _prefix, _row_key in (('lens_light', '_lens_light_spectrum'), ('source', '_source_spectrum')):
+            _spec = row.get(_row_key)
+            if _spec is not None:
+                data_dict[f'{_prefix}_spectrum_wave_obs_aa'] = _spec['wave_obs_aa']
+                data_dict[f'{_prefix}_spectrum_flux_fnu_cgs'] = _spec['flux_fnu_cgs']
+
         # 5. Save unified .npz file (compressed)
         npz_path = unified_dir / f"{base}.npz"
         np.savez_compressed(npz_path, **data_dict)
@@ -9526,7 +9640,25 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
             'source_position_resampled_for_caustic': row_data.get('source_position_resampled_for_caustic', False),
             'source_mag_brightening_applied': row_data.get('source_mag_brightening_applied', False),
         }
-        
+        # FIX (2026-08-01): same class of bug as the theta_E fix above --
+        # this minimal dict silently dropped the FSPS stellar-population
+        # metadata (mass-weighted age/metallicity/age_method, 33-band SED,
+        # observed-frame spectra) that simulate_complete_lens_system_with_
+        # real_fields() attaches to row_data, because this call site is a
+        # separate minimal reconstruction rather than a copy of row_data.
+        # Copy by prefix instead of listing every one of the ~70 keys
+        # (lens_light_sed_<BAND>/source_sed_<BAND> alone is 66 keys).
+        _fsps_key_prefixes = (
+            'lens_light_mass_weighted_', 'lens_light_age_method', 'lens_light_sed_',
+            'source_mass_weighted_', 'source_age_method', 'source_sed_',
+        )
+        for _k, _v in row_data.items():
+            if isinstance(_k, str) and _k.startswith(_fsps_key_prefixes):
+                row[_k] = _v
+        for _spec_key in ('_lens_light_spectrum', '_source_spectrum'):
+            if row_data.get(_spec_key) is not None:
+                row[_spec_key] = row_data[_spec_key]
+
         # Add time-delay metadata if present
         metadata = {}
         if normalization_scales:

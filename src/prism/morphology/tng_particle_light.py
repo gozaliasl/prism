@@ -210,6 +210,24 @@ if _FSPS_GRID_PATH.exists():
         pass
     print(f"[SED] Using real FSPS SSP grid with nebular emission "
           f"({len(_fsps_bands)} bands) instead of the anchor-table approximation")
+
+# Raw wavelength-resolved SSP grid (same FSPS run as the band-integrated
+# grid above, before the filter integration collapses it to broadband
+# numbers) -- used by stellar_population_spectrum() to expose a full
+# rest/observed-frame spectrum per system, e.g. for ML models trained to
+# predict spectra from images, or ground-truth spectral-line/redshift
+# measurement.
+_FSPS_SPECTRUM_GRID_PATH = Path(__file__).resolve().parents[3] / "data" / "fsps_ssp_grid.npz"
+_FSPS_SPECTRUM_GRID = None
+if _FSPS_SPECTRUM_GRID_PATH.exists():
+    _spec_grid_npz = np.load(_FSPS_SPECTRUM_GRID_PATH)
+    _FSPS_SPECTRUM_GRID = dict(
+        wave_aa=_spec_grid_npz["wave_aa"],
+        age_gyr=_spec_grid_npz["age_gyr"],
+        logzsol=_spec_grid_npz["logzsol"],
+        l_nu_grid=_spec_grid_npz["l_nu_grid"].astype(np.float64),  # (n_age, n_z, n_wave)
+    )
+
 _DUST_REF_WAVELENGTH_NM = 550.0  # V-band reference
 _DUST_POWER = 1.3
 _DUST_K = 0.5  # tunable: dust-attenuation strength per unit normalized gas surface density
@@ -480,13 +498,280 @@ def _band_images(particle_file: Path, halfmassrad_stars_kpc: float, rng,
         img = img * attenuation
         band_images[band] = np.clip(img, 0.0, None)
 
+    # Mass-weighted stellar age/metallicity over the same light-aperture-
+    # clipped population used for the rendered image (star_mass/star_ages/
+    # star_metal above) -- a physical summary of the population that
+    # actually produced this galaxy's light, for metadata (not used in
+    # rendering itself).
+    total_mass = float(np.sum(star_mass))
+    if total_mass > 0:
+        mass_weighted_age_gyr = float(np.sum(star_mass * star_ages) / total_mass)
+        mass_weighted_metallicity_zsun = float(
+            np.sum(star_mass * star_metal) / total_mass / _SOLAR_METALLICITY)
+        # Mass-weighted mean V-band dust optical depth (same tau_v_map used
+        # per-pixel above), for a single overall attenuation applied to the
+        # aperture-integrated composite spectrum in
+        # stellar_population_spectrum() -- an aperture-averaged
+        # approximation of the spatially-resolved per-pixel attenuation
+        # used for the actual rendered images.
+        _star_ix = np.clip(np.searchsorted(edges, star_x) - 1, 0, NPIX - 1)
+        _star_iy = np.clip(np.searchsorted(edges, star_y) - 1, 0, NPIX - 1)
+        _star_tau_v = tau_v_map[_star_iy, _star_ix]
+        mass_weighted_tau_v = float(np.sum(star_mass * _star_tau_v) / total_mass)
+    else:
+        mass_weighted_age_gyr = float("nan")
+        mass_weighted_metallicity_zsun = float("nan")
+        mass_weighted_tau_v = 0.0
+
     if use_cache:
         _cache_set(_PROJECTION_CACHE, key, dict(
             band_images=band_images, extent_kpc=extent,
             inclination_rad=proj["inclination_rad"],
             position_angle_rad=proj["position_angle_rad"],
+            mass_weighted_age_gyr=mass_weighted_age_gyr,
+            mass_weighted_metallicity_zsun=mass_weighted_metallicity_zsun,
+            mass_weighted_tau_v=mass_weighted_tau_v,
+            total_star_mass_msun=total_mass,
         ))
     return band_images
+
+
+def stellar_population_summary(particle_file: Path, halfmassrad_stars_kpc: float,
+                                magnitude_ref: float, ref_band: str, rng=None) -> dict:
+    """Physical summary of the star-particle population that renders this
+    galaxy's light: mass-weighted age/metallicity, plus the full-SED
+    apparent magnitude in every band FSPS was integrated against (not just
+    the ones actually rendered for this system) -- anchored to the same
+    ``magnitude_ref``/``ref_band`` convention as
+    ``build_tng_particle_interpol_kwargs`` so the SED is self-consistent
+    with the system's actual observed brightness, not a separately-
+    normalized absolute quantity.
+
+    Requires the real FSPS SSP grid (data/fsps_band_age_metal_grid.npz) to
+    have >1 band -- with the anchor-table fallback (12 JWST/Euclid bands)
+    this still works, just over a smaller band set.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    band_images = _band_images(Path(particle_file), halfmassrad_stars_kpc, rng)
+    cached = _PROJECTION_CACHE[str(particle_file)]
+
+    flux_ref = float(np.sum(band_images[ref_band]))
+    sed_mags = {}
+    for band in band_images:
+        flux_band = float(np.sum(band_images[band]))
+        color_offset = -2.5 * np.log10(max(flux_band, 1e-30) / max(flux_ref, 1e-30))
+        sed_mags[band] = float(magnitude_ref) + color_offset
+
+    return dict(
+        mass_weighted_age_gyr=cached["mass_weighted_age_gyr"],
+        mass_weighted_metallicity_zsun=cached["mass_weighted_metallicity_zsun"],
+        sed_mags=sed_mags,
+    )
+
+
+_AB_ZEROPOINT_FNU_CGS = 3631.0e-23  # erg/s/cm^2/Hz at AB mag = 0
+
+
+def stellar_population_spectrum(particle_file: Path, halfmassrad_stars_kpc: float,
+                                 magnitude_ref: float, ref_band: str, redshift: float,
+                                 rng=None) -> dict | None:
+    """Observed-frame flux-density spectrum for this galaxy's stellar
+    population, for ML training on image->spectrum prediction or
+    ground-truth spectral-line/redshift measurement -- not used anywhere
+    in image rendering itself.
+
+    Method (approximations stated explicitly):
+    1. Rest-frame composite spectrum = the full FSPS SSP spectrum (with
+       nebular emission) evaluated at this population's MASS-WEIGHTED MEAN
+       age/metallicity and scaled by its total stellar mass. This is a
+       single-population approximation -- a true per-particle-summed
+       composite (mixing each particle's own age/Z spectrum) would capture
+       population spread (e.g. a young nuclear starburst on an old disk)
+       that a single mean-age/Z point cannot; not implemented here for
+       cost reasons.
+    2. Dust: the same gas-density-based attenuation law used per-pixel in
+       _band_images, applied once with the mass-weighted mean V-band
+       optical depth (an aperture-averaged approximation of the spatially-
+       resolved attenuation actually used in the rendered images).
+    3. Redshifted to observed frame (wave_obs = wave_rest * (1+z)).
+    4. Absolute flux normalization: anchored so the spectrum's value at
+       the rest-frame wavelength that redshifts into ``ref_band``'s
+       central wavelength reproduces ``magnitude_ref`` exactly (standard
+       single-point SED-anchor trick) -- NOT a full bandpass integral, and
+       not a from-scratch luminosity-distance calculation (this pipeline
+       does not track physical aperture/luminosity-distance flux
+       normalization anywhere else either; every band's amplitude is set
+       the same way, via a config-driven apparent magnitude).
+
+    Returns ``None`` if the raw FSPS spectral grid
+    (data/fsps_ssp_grid.npz) or a TNG-particle-derived age/metallicity
+    summary isn't available.
+
+    Returns
+    -------
+    dict with:
+      wave_obs_aa   : (n_wave,) observed-frame wavelength, Angstrom
+      flux_fnu_cgs  : (n_wave,) observed-frame flux density, erg/s/cm^2/Hz
+                      (standard AB-magnitude-convention units: mag_AB =
+                      -2.5*log10(flux_fnu_cgs / 3631e-23))
+      redshift      : float, the redshift used
+    """
+    if _FSPS_SPECTRUM_GRID is None:
+        return None
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Ensures _PROJECTION_CACHE has the mass-weighted age/Z/tau_V/mass for
+    # this particle_file (computed as a side effect of _band_images).
+    _band_images(Path(particle_file), halfmassrad_stars_kpc, rng)
+    cached = _PROJECTION_CACHE[str(particle_file)]
+    return _composite_spectrum_from_age_metal(
+        age_gyr=cached["mass_weighted_age_gyr"],
+        z_zsun=cached["mass_weighted_metallicity_zsun"],
+        total_mass_msun=cached["total_star_mass_msun"],
+        tau_v=cached["mass_weighted_tau_v"],
+        magnitude_ref=magnitude_ref, ref_band=ref_band, redshift=redshift,
+    )
+
+
+# sSFR-class -> representative mass-weighted stellar age (Gyr). Used ONLY
+# for the Sersic-fallback path (no per-particle SFH available there, unlike
+# the TNG-particle path's real mass-weighted age) -- an explicit, coarse
+# proxy, not a fitted star-formation history. Reuses the same
+# TNG_QUENCHED_SSFR_THRESHOLD/TNG_STARBURST_SSFR_THRESHOLD boundaries the
+# rest of the pipeline already uses for SED-type classification (see
+# tng_sed_galaxy_type() in simulator.py) so the age proxy is at least
+# self-consistent with the SED-type/dust choices made elsewhere.
+_SSFR_CLASS_AGE_PROXY_GYR = dict(passive=9.0, star_forming=2.0, dusty_starburst=0.15)
+
+
+def _composite_spectrum_from_age_metal(age_gyr: float, z_zsun: float, total_mass_msun: float,
+                                        tau_v: float, magnitude_ref: float, ref_band: str,
+                                        redshift: float) -> dict | None:
+    """Shared spectrum-building core for both stellar_population_spectrum
+    (TNG-particle path, real mass-weighted age/Z/dust) and
+    stellar_population_spectrum_sersic_fallback (age-class proxy,
+    TNG-catalog-match metallicity, no spatial dust map) -- see each
+    caller's docstring for what's approximate in each case."""
+    if _FSPS_SPECTRUM_GRID is None:
+        return None
+    if not np.isfinite(age_gyr) or total_mass_msun <= 0:
+        return None
+
+    wave_aa = _FSPS_SPECTRUM_GRID["wave_aa"]
+    grid_age = _FSPS_SPECTRUM_GRID["age_gyr"]
+    grid_logzsol = _FSPS_SPECTRUM_GRID["logzsol"]
+    l_nu_grid = _FSPS_SPECTRUM_GRID["l_nu_grid"]  # (n_age, n_z, n_wave)
+
+    logzsol = float(np.log10(max(z_zsun, 1e-4)))
+    log_age = np.log10(np.clip(age_gyr, grid_age[0], grid_age[-1]))
+    log_age_grid = np.log10(grid_age)
+    i = int(np.clip(np.searchsorted(log_age_grid, log_age) - 1, 0, len(log_age_grid) - 2))
+    age_frac = (log_age - log_age_grid[i]) / (log_age_grid[i + 1] - log_age_grid[i])
+
+    logzsol_clip = float(np.clip(logzsol, grid_logzsol[0], grid_logzsol[-1]))
+    j = int(np.clip(np.searchsorted(grid_logzsol, logzsol_clip) - 1, 0, len(grid_logzsol) - 2))
+    z_frac = (logzsol_clip - grid_logzsol[j]) / (grid_logzsol[j + 1] - grid_logzsol[j])
+
+    l_nu_rest = (
+        l_nu_grid[i, j, :] * (1 - age_frac) * (1 - z_frac)
+        + l_nu_grid[i, j + 1, :] * (1 - age_frac) * z_frac
+        + l_nu_grid[i + 1, j, :] * age_frac * (1 - z_frac)
+        + l_nu_grid[i + 1, j + 1, :] * age_frac * z_frac
+    ) * total_mass_msun  # grid is per Msun formed -> scale to this population's mass
+
+    dust_attenuation = np.exp(-tau_v * (_DUST_REF_WAVELENGTH_NM * 10.0 / wave_aa) ** _DUST_POWER)
+    l_nu_rest_dusty = l_nu_rest * dust_attenuation
+
+    z = max(float(redshift), 0.0)
+    wave_obs_aa = wave_aa * (1.0 + z)
+
+    ref_wave_obs_nm = BAND_WAVELENGTH_NM.get(ref_band)
+    if ref_wave_obs_nm is None:
+        return None
+    ref_wave_rest_aa = ref_wave_obs_nm * 10.0 / (1.0 + z)
+    l_nu_at_ref_rest = float(np.interp(ref_wave_rest_aa, wave_aa, l_nu_rest_dusty))
+    if l_nu_at_ref_rest <= 0:
+        return None
+
+    target_fnu_ref_cgs = _AB_ZEROPOINT_FNU_CGS * 10.0 ** (-0.4 * float(magnitude_ref))
+    scale = target_fnu_ref_cgs / l_nu_at_ref_rest
+    flux_fnu_cgs = l_nu_rest_dusty * scale
+
+    return dict(
+        wave_obs_aa=wave_obs_aa.astype(np.float32),
+        flux_fnu_cgs=flux_fnu_cgs.astype(np.float32),
+        redshift=z,
+    )
+
+
+def stellar_population_summary_sersic_fallback(tng_info: dict, magnitude_ref: float,
+                                                ref_band: str) -> dict | None:
+    """Sersic-fallback equivalent of stellar_population_summary(): no local
+    particle cutout, so no real mass-weighted age -- instead uses the
+    TNG-matched subhalo's real measured metallicity (star_metallicity) and
+    a coarse sSFR-class age proxy (_SSFR_CLASS_AGE_PROXY_GYR, see its
+    comment). Returns None if there is no TNG catalog match at all (a
+    purely-parametric system with no subhalo association has no physical
+    age/metallicity information to draw on)."""
+    if tng_info is None or BAND_AGE_METAL_LUMINOSITY is None:
+        return None
+    z_zsun = float(tng_info.get('star_metallicity', _SOLAR_METALLICITY)) / _SOLAR_METALLICITY
+    galaxy_type = _tng_sed_galaxy_type_local(tng_info)
+    age_gyr = _SSFR_CLASS_AGE_PROXY_GYR[galaxy_type]
+
+    age_arr = np.array([age_gyr])
+    z_arr = np.array([z_zsun * _SOLAR_METALLICITY])
+    flux_ref = float(_stellar_band_luminosity(age_arr, z_arr, ref_band)[0])
+    sed_mags = {}
+    for band in BAND_AGE_METAL_LUMINOSITY:
+        flux_band = float(_stellar_band_luminosity(age_arr, z_arr, band)[0])
+        color_offset = -2.5 * np.log10(max(flux_band, 1e-30) / max(flux_ref, 1e-30))
+        sed_mags[band] = float(magnitude_ref) + color_offset
+
+    return dict(
+        mass_weighted_age_gyr=age_gyr,
+        mass_weighted_metallicity_zsun=z_zsun,
+        age_method='ssfr_class_proxy',  # vs 'mass_weighted_particles' for the TNG-particle path
+        sed_mags=sed_mags,
+    )
+
+
+def stellar_population_spectrum_sersic_fallback(tng_info: dict, stellar_mass_msun: float,
+                                                 magnitude_ref: float, ref_band: str,
+                                                 redshift: float) -> dict | None:
+    """Sersic-fallback equivalent of stellar_population_spectrum(): same
+    FSPS grid + redshift + single-point flux anchor as the TNG-particle
+    path, but the (age, metallicity) point comes from
+    stellar_population_summary_sersic_fallback() instead of a real
+    per-particle mass-weighted average, and dust is NOT applied (tau_v=0)
+    since there is no gas/metal spatial map for a pure Sersic system in
+    this pipeline -- the Sersic path's own image-level dust/reddening
+    treatment, if any, is unaffected by this spectral product."""
+    if tng_info is None:
+        return None
+    summary = stellar_population_summary_sersic_fallback(tng_info, magnitude_ref, ref_band)
+    if summary is None:
+        return None
+    return _composite_spectrum_from_age_metal(
+        age_gyr=summary['mass_weighted_age_gyr'],
+        z_zsun=summary['mass_weighted_metallicity_zsun'],
+        total_mass_msun=float(stellar_mass_msun),
+        tau_v=0.0,
+        magnitude_ref=magnitude_ref, ref_band=ref_band, redshift=redshift,
+    )
+
+
+def _tng_sed_galaxy_type_local(tng_info: dict) -> str:
+    """Local copy of simulator.tng_sed_galaxy_type() (avoids a circular
+    import -- simulator.py imports FROM this module, not the reverse)."""
+    ssfr = tng_info.get('ssfr_per_yr', 0.0)
+    if ssfr < 1e-11:
+        return 'passive'
+    if ssfr > 1e-9:
+        return 'dusty_starburst'
+    return 'star_forming'
 
 
 def get_projection_orientation(particle_file: Path, halfmassrad_stars_kpc: float, rng=None) -> tuple[float, float]:
