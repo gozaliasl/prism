@@ -1,0 +1,10 @@
+# Minimal overlay: use HYDRIS as the particle light engine.
+# Merge with a particle-enabled config, e.g.:
+#   python -m prism.core.simulator \
+#     --config configs/tng_particle_test10_run2.yaml \
+#     --config configs/hydris_light_engine.yaml \
+# (if multi-config unsupported, copy light_engine into your run YAML)
+
+tng_mode:
+  particle_morphology:
+    light_engine: hydris

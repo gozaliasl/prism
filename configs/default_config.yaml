@@ -388,6 +388,10 @@ tng_mode:
   # otherwise falls back to the Sersic-based morphology.
   particle_morphology:
     enabled: false
+    # Light engine for particle INTERPOL builders:
+    #   legacy — in-tree prism.morphology.tng_particle_light
+    #   hydris — HYDRIS package (pip install -e ../prism-rendering-galaxy-hydrsim)
+    light_engine: legacy
     lens_enabled: true
     lens_fraction: 1.0
     source_enabled: true

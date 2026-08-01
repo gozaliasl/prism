@@ -41,12 +41,31 @@ needs the separate SPS_HOME isochrone/spectral-library data
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import numpy as np
 import h5py
 from astropy.cosmology import FlatLambdaCDM
 from scipy.ndimage import gaussian_filter
+
+# Particle light engine: ``legacy`` (this module) or ``hydris`` (HYDRIS package).
+# Set via ``set_light_engine`` from PRISM config
+# ``tng_mode.particle_morphology.light_engine``, or env ``PRISM_LIGHT_ENGINE``.
+_LIGHT_ENGINE = os.environ.get("PRISM_LIGHT_ENGINE", "legacy").strip().lower()
+
+
+def set_light_engine(name: str) -> None:
+    """Select ``legacy`` or ``hydris`` for particle INTERPOL builders."""
+    global _LIGHT_ENGINE
+    engine = (name or "legacy").strip().lower()
+    if engine not in ("legacy", "hydris"):
+        raise ValueError(f"light_engine must be 'legacy' or 'hydris', got {name!r}")
+    _LIGHT_ENGINE = engine
+
+
+def get_light_engine() -> str:
+    return _LIGHT_ENGINE
 
 # Same cosmology used elsewhere (galaxygenius_stamps.py, jwst_lens_simulator.py).
 _COSMO = FlatLambdaCDM(H0=70, Om0=0.3)
@@ -783,6 +802,9 @@ def get_projection_orientation(particle_file: Path, halfmassrad_stars_kpc: float
     ellipticals -- are not infinitely thin. Intended for aligning a lens
     mass model's ellipticity/PA with its TNG-particle-rendered light when
     both come from the same subhalo (mass-light orientation consistency)."""
+    if _LIGHT_ENGINE == "hydris":
+        from hydris.prism_api import get_projection_orientation as _hydris_orient
+        return _hydris_orient(particle_file, halfmassrad_stars_kpc, rng)
     _band_images(Path(particle_file), halfmassrad_stars_kpc, rng if rng is not None else np.random.default_rng())
     cached = _PROJECTION_CACHE[str(particle_file)]
     axis_ratio = float(np.clip(np.cos(cached["inclination_rad"]), 0.3, 1.0))
@@ -815,7 +837,25 @@ def build_tng_particle_interpol_kwargs(
     ``rng`` is only consumed the first time a given ``particle_file`` is
     projected (the resulting projection/binning is cached and reused for all
     bands and subsequent calls in this process).
+
+    When ``light_engine`` is ``hydris`` (see ``set_light_engine``), delegates
+    to ``hydris.prism_api`` (HYDRIS physics with the same kwargs contract).
     """
+    if _LIGHT_ENGINE == "hydris":
+        from hydris.prism_api import build_tng_particle_interpol_kwargs as _hydris_build
+        return _hydris_build(
+            band=band,
+            particle_file=particle_file,
+            halfmassrad_stars_kpc=halfmassrad_stars_kpc,
+            magnitude_ref=magnitude_ref,
+            ref_band=ref_band,
+            center_x=center_x,
+            center_y=center_y,
+            phi_G=phi_G,
+            target_size_arcsec=target_size_arcsec,
+            rng=rng,
+            smooth_sigma=smooth_sigma,
+        )
     if rng is None:
         rng = np.random.default_rng()
 
