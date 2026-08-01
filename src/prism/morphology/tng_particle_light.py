@@ -172,6 +172,44 @@ BAND_WAVELENGTH_NM = {
     "F200W": 2000.0, "F277W": 2770.0, "F356W": 3560.0, "F444W": 4440.0,
     "EUCLID_VIS": 715.0, "EUCLID_Y": 1083.0, "EUCLID_J": 1371.0, "EUCLID_H": 1774.0,
 }
+
+# --- Real FSPS SSP grid override (with nebular emission) -------------------
+# If data/fsps_band_age_metal_grid.npz exists (built by
+# scripts/local/build_fsps_ssp_grid.py + integrate_fsps_grid_to_bands.py --
+# see those scripts' docstrings), replace the anchor-table approximation
+# above with a real stellar-population-synthesis lookup: FSPS SSP spectra
+# (Chabrier IMF, Cloudy-based nebular continuum + emission lines via
+# add_neb_emission=True) integrated through this project's own real
+# per-telescope filter throughput curves
+# (prism.telescopes.multi_telescope_filters). This is the concrete
+# implementation of the "iMaNGA SED upgrade" scoped in this session: same
+# underlying idea (real age/metallicity -> spectrum -> photometry, instead
+# of a hand-tuned anchor table), using FSPS's built-in nebular emission
+# rather than a separate MappingsIII step, and covering JWST + Roman +
+# Euclid + Subaru + LSST bands (the old anchor table only had JWST+Euclid).
+# Falls back silently to the anchor-table approximation above if the grid
+# file hasn't been generated (it requires a ~1.3 GB external FSPS data
+# download, not committed to the repo).
+_FSPS_GRID_PATH = Path(__file__).resolve().parents[3] / "data" / "fsps_band_age_metal_grid.npz"
+
+if _FSPS_GRID_PATH.exists():
+    _fsps_grid = np.load(_FSPS_GRID_PATH)
+    AGE_GRID_GYR = _fsps_grid["age_gyr"]
+    METAL_GRID_ZREL = 10.0 ** _fsps_grid["logzsol"]  # logzsol -> Z/Zsun
+    _fsps_bands = [str(b) for b in _fsps_grid["bands"]]
+    _fsps_band_lum = _fsps_grid["band_lum"]  # (n_band, n_age, n_z)
+    BAND_AGE_METAL_LUMINOSITY = {b: _fsps_band_lum[i].astype(np.float64)
+                                  for i, b in enumerate(_fsps_bands)}
+    try:
+        from prism.telescopes.multi_telescope_filters import get_multi_telescope_filters as _get_mtf
+        _mtf_wavelengths = _get_mtf().filter_wavelengths
+        for _b in _fsps_bands:
+            if _b not in BAND_WAVELENGTH_NM and _b in _mtf_wavelengths:
+                BAND_WAVELENGTH_NM[_b] = _mtf_wavelengths[_b] * 1000.0  # microns -> nm
+    except Exception:
+        pass
+    print(f"[SED] Using real FSPS SSP grid with nebular emission "
+          f"({len(_fsps_bands)} bands) instead of the anchor-table approximation")
 _DUST_REF_WAVELENGTH_NM = 550.0  # V-band reference
 _DUST_POWER = 1.3
 _DUST_K = 0.5  # tunable: dust-attenuation strength per unit normalized gas surface density

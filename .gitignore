@@ -34,3 +34,5 @@ src/prism/morphology/generative/checkpoints/*.pt
 # Runtime PSF cache accidentally written into the package tree by a
 # relative-path fallback (should resolve against prism-data instead)
 src/prism/data/
+data/fsps_home/
+outputs_test/
