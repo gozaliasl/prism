@@ -8558,8 +8558,20 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
     
     sample_type = "lens" if is_lens else "nonlens"
     epoch_str = f"epoch{epoch_index:02d}_" if epoch_index is not None else ""
-    
-    if is_lens:
+
+    # FIX (adversarial audit finding C-14, 2026-08-01): this is the naming
+    # construction actually used under output.unified_storage=true (this
+    # project's default/primary output mode) -- an earlier fix to the
+    # filename_base variable in the caller did NOT reach this code, since
+    # save_outputs_unified rebuilds the name from scratch here using
+    # is_lens/lens_system_class directly, unconditionally leaking the
+    # class (and, for lenses, the lens_system_class) into the filename.
+    # Same opt-in output.neutral_filenames flag as the other fix.
+    _neutral_names = CONFIG.get('output', {}).get('neutral_filenames', False) if isinstance(CONFIG, dict) else False
+    if _neutral_names:
+        _neutral_id = int(lens_id) + (0 if is_lens else 1_000_000)
+        base = f"cosmos_sample_{epoch_str}{_neutral_id:06d}"
+    elif is_lens:
         # Lens format: PRISM_lens_TYPE_[epoch_]ID
         lens_system_class = field_info.get('lens_system_class', 'single_field') if field_info else 'single_field'
         short_code = LensSystemClassifier.get_short_code(lens_system_class)
