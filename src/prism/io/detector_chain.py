@@ -505,12 +505,28 @@ class DetectorChain:
         return im_e + self.persistence_map * decay
 
     def _apply_gain_adc(self, im_e: np.ndarray) -> np.ndarray:
-        """Convert e- to ADU with gain, quantize (integer), convert back."""
+        """Convert e- to ADU with gain, quantize (integer), convert back.
+
+        FIX (adversarial audit finding C-8, 2026-08-01): clipping directly
+        at ADU=0 truncates the negative half of the read/1/f noise
+        distribution around a near-zero signal (there is no step upstream
+        that keeps the signal positive-definite before this point), biasing
+        the mean noise level positive and understating its true variance.
+        Real detectors avoid this by adding a bias pedestal (typically
+        thousands of ADU) BEFORE quantization specifically so negative
+        noise fluctuations still map to positive ADU counts; the pedestal
+        is subtracted back out during calibration ("bias subtraction").
+        Apply the same pattern here: add a bias pedestal comfortably above
+        the expected noise range, quantize, then subtract it back out in
+        electron units -- this only removes the artificial floor, it does
+        not change the mean signal level downstream code expects.
+        """
         p = self.params
         gain = p['gain'] * self._gain_corr
         adc_max = 2**p['adc_bits'] - 1
-        adu = np.clip(np.round(im_e / gain), 0, adc_max).astype(np.int32)
-        return adu.astype(np.float64) * gain    # back to e- (quantized)
+        bias_adu = min(2000.0, adc_max * 0.1)  # comfortably above the noise floor, well under saturation
+        adu = np.clip(np.round(im_e / gain) + bias_adu, 0, adc_max).astype(np.int32)
+        return (adu.astype(np.float64) - bias_adu) * gain    # back to e- (quantized, bias-subtracted)
 
 
 # ---------------------------------------------------------------------------
