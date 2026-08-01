@@ -1157,6 +1157,16 @@ def load_config(config_path: Optional[str]):
         print(f"[CONFIG] Loaded configuration from {config_path}")
     except Exception as e:
         print(f"[CONFIG] Failed to load {config_path}: {e}")
+
+    # Particle light engine: legacy (in-tree) or hydris (HYDRIS package).
+    try:
+        _pm = CONFIG.get('tng_mode', {}).get('particle_morphology', {})
+        _engine = _pm.get('light_engine', os.environ.get('PRISM_LIGHT_ENGINE', 'legacy'))
+        from prism.morphology.tng_particle_light import set_light_engine
+        set_light_engine(_engine)
+        print(f"[CONFIG] Particle light_engine: {_engine}")
+    except Exception as e:
+        print(f"[CONFIG] light_engine setup skipped: {e}")
     
     # Update UPPER_BANDS from config if specified
     if 'bands' in CONFIG:
@@ -6820,6 +6830,14 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     
     # === GENERATE IMAGES PER BAND ===
     images = {}
+    # Lens-light-subtracted (source-only, still PSF-convolved) image per
+    # band -- cheap to compute alongside the main render (reuses the same
+    # sim/im_model/kwargs already built for `clean`), used both for a QC
+    # "arc only" RGB view and a lensed-source SNR metric (user-reported,
+    # 2026-08-01: some rendered systems have a real but visually
+    # undetectable arc -- low magnification + faint high-z source swamped
+    # by lens light + noise in the combined image).
+    arc_only_images = {}
     
     # Get PSF arrays once for all steps
     psf_arrays_all = None
@@ -7001,6 +7019,35 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                 except Exception as _e_extra:
                     print(f"[MULTI-SOURCE] Band {b} extra source render failed: {_e_extra}")
 
+            # Lens-light-subtracted (source-only) image, PSF-convolved the
+            # same way as `clean` -- for the arc-visibility SNR metric and
+            # QC "arc only" RGB view (see arc_only_images comment above).
+            # Needs its own SimAPI/ImageModel with an EMPTY lens_light_
+            # model_list -- reusing `im_model` (built with the full multi-
+            # component lens_light_model_list) and passing
+            # kwargs_lens_light=[] mismatches the model's expected kwargs
+            # length and raises "list index out of range" (same reason
+            # generate_intermediate_images() builds a separate step_sim
+            # for its 'sources_only' step instead of reusing the main one).
+            try:
+                _arc_model_lists = dict(
+                    lens_model_list=lens_model_list,
+                    lens_light_model_list=[],
+                    source_light_model_list=source_fragment,
+                )
+                _arc_sim = SimAPI(numpix=int(numpix), kwargs_single_band=filter_lenstronomy_params(cfg),
+                                   kwargs_model=_arc_model_lists)
+                _, _arc_kw_src_amp, _ = _arc_sim.magnitude2amplitude([], kw_src)
+                _arc_im_model = _arc_sim.image_model_class(numerics)
+                _arc_only = _arc_im_model.image(
+                    kwargs_lens=kwargs_lens, kwargs_source=_arc_kw_src_amp, kwargs_lens_light=[],
+                )
+                if psf_arrays_all and b in psf_arrays_all and psf_arrays_all[b] is not None:
+                    _arc_only = apply_psf_convolution(_arc_only, psf_arrays_all[b])
+                arc_only_images[b] = _arc_only
+            except Exception as _e_arc:
+                print(f"[ARC_SNR] Band {b} arc-only render failed: {_e_arc}")
+
             # Apply PSF convolution if PSF data is available
             if psf_arrays_all and b in psf_arrays_all and psf_arrays_all[b] is not None:
                 clean = apply_psf_convolution(clean, psf_arrays_all[b])
@@ -7022,6 +7069,29 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             center = numpix // 2
             fallback[center-12:center+12, center-12:center+12] += 5e-7
             images[b] = fallback.astype(np.float32)
+
+    # Lensed-source visibility SNR (user-reported, 2026-08-01): a system
+    # can pass the magnification gate yet still have its arc effectively
+    # invisible against lens light + noise in the combined image (e.g.
+    # low magnification near the gate floor, a faint high-z source, a
+    # bright/binary lens). Reports both peak-pixel and integrated SNR of
+    # the arc-only signal against that band's own background noise, per
+    # band, so the catalog can be filtered/sorted by actual visibility
+    # rather than just the magnification that was targeted.
+    for _b, _arc_img in arc_only_images.items():
+        if _b not in images:
+            continue
+        _sky_level = float(np.median(images[_b]))
+        _noise_sigma = float(np.median(np.abs(images[_b] - _sky_level)) * 1.4826)
+        if _noise_sigma <= 0:
+            _noise_sigma = float(np.std(images[_b])) or 1e-12
+        _arc_peak_snr = float(np.max(_arc_img) / _noise_sigma)
+        _arc_pix_above_1sigma = _arc_img > _noise_sigma
+        _arc_total_snr = float(
+            np.sum(_arc_img[_arc_pix_above_1sigma])
+            / (_noise_sigma * np.sqrt(max(int(np.sum(_arc_pix_above_1sigma)), 1))))
+        row[f'lensed_source_peak_snr_{_b.lower()}'] = _arc_peak_snr
+        row[f'lensed_source_integrated_snr_{_b.lower()}'] = _arc_total_snr
 
     # NEW v11: Apply morphological enhancements to ALL bands at once
     try:
@@ -7210,6 +7280,9 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         'tng_lens': _tng_lens,
         'tng_source': _tng_source,
         'tng_field': [g.get('tng_info') for g in field_galaxies_base],
+        # Lens-light-subtracted (source-only) images per band, for the QC
+        # "arc only" RGB view -- see arc_only_images comment above.
+        'arc_only_images': arc_only_images,
     }
     field_info.update(field_structural_meta)
 
@@ -8765,6 +8838,26 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
         except Exception as e:
             print(f"[WARNING] RGB creation failed for {base}: {e}")
 
+        # 3b. QC "arc only" RGB (user-reported, 2026-08-01): the lensed
+        # source can be genuinely present but visually undetectable in the
+        # main image against lens light + noise. This is a lens-light-
+        # subtracted view (arc_only_images, computed alongside the main
+        # render) for visual confirmation the arc IS there -- NOT a
+        # replacement for the science data, and not saved into the npz
+        # (display/QC only, same spirit as display_rgb_visualization).
+        try:
+            _arc_only = field_info.get('arc_only_images') if field_info else None
+            if _arc_only:
+                arc_rgb = create_jwst_rgb(_arc_only, bands=active_bands, telescope=_tel)
+                if arc_rgb is not None:
+                    arc_dir = out_root / "jpg_rgb_arc_only"
+                    arc_dir.mkdir(parents=True, exist_ok=True)
+                    Image.fromarray((arc_rgb * 255).astype(np.uint8)).save(
+                        arc_dir / f"{base}.jpg", quality=95, optimize=True
+                    )
+        except Exception as e:
+            print(f"[WARNING] Arc-only QC RGB failed for {base}: {e}")
+
         # 4. Optional stacked .npy output (steps x 5 channels)
         stacked_cfg = CONFIG.get('output', {}).get('stacked_npy', {})
         if stacked_cfg.get('enabled', False):
@@ -8885,6 +8978,13 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
                     k[len(_sed_prefix):]: float(v) for k, v in row.items()
                     if k.startswith(_sed_prefix)
                 }
+
+        # Lensed-source visibility SNR per band (user-reported, 2026-08-01)
+        # -- see the arc_only_images computation for what this measures.
+        meta['lensed_source_snr'] = {
+            k[len('lensed_source_'):]: float(v) for k, v in row.items()
+            if isinstance(k, str) and k.startswith('lensed_source_') and pd.notna(v)
+        }
 
         if epoch_index is not None:
             meta['epoch_index'] = epoch_index
@@ -9651,6 +9751,7 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
         _fsps_key_prefixes = (
             'lens_light_mass_weighted_', 'lens_light_age_method', 'lens_light_sed_',
             'source_mass_weighted_', 'source_age_method', 'source_sed_',
+            'lensed_source_peak_snr_', 'lensed_source_integrated_snr_',
         )
         for _k, _v in row_data.items():
             if isinstance(_k, str) and _k.startswith(_fsps_key_prefixes):
