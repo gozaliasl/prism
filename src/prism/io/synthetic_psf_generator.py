@@ -397,6 +397,7 @@ def build_resolution_psf_cache(
         psf_size: int = 101,
         rng=None,
         cache_dir: Path | str | None = None,
+        q1_psf_dir: Path | str | None = None,
 ) -> dict:
     """
     Build a PSF data dictionary for a given telescope/resolution.
@@ -417,7 +418,21 @@ def build_resolution_psf_cache(
     """
     # Euclid: prefer empirical Q1 kernels when available (before disk cache)
     if res_name == 'euclid':
-        empirical = load_euclid_q1_psf_data(bands=bands)
+        # FIX (adversarial audit finding, 2026-08-01): load_euclid_q1_psf_data
+        # was always called with psf_dir=None, which falls back to a
+        # package-relative default path (src/prism/data/euclid_q1_psf/tiles)
+        # that does NOT exist in this package layout -- the configured
+        # euclid_q1.data_dir (e.g. pointing at the real PSF tiles on an
+        # external data volume) was silently ignored, and empirical PSFs
+        # silently fell back to a Gaussian/analytical approximation instead
+        # (confirmed by execution: "[PSF] Euclid Q1 empirical PSF dir not
+        # found" printed even when a working data_dir WAS configured and
+        # successfully used by the separate euclid_q1 population-prior
+        # loading code elsewhere in the pipeline -- i.e. two different
+        # code paths for the same config value disagreed on where to find
+        # the data). q1_psf_dir is now threaded through from CONFIG at the
+        # call site in simulator.py.
+        empirical = load_euclid_q1_psf_data(psf_dir=q1_psf_dir, bands=bands)
         if empirical:
             return empirical
 

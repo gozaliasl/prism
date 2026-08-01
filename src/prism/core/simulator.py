@@ -10623,8 +10623,16 @@ Example usage:
                             _DET_PARAMS.get(_rname, {}).get('pixel_scale', 0.200)))
                 _bands = get_telescope_bands(_rname, CONFIG.get('bands'))
                 print(f"  [{_rname}] pixel_scale={_ps}\"/pix  bands={_bands}")
+                # FIX (adversarial audit finding, 2026-08-01): thread the
+                # configured euclid_q1.data_dir through so empirical Q1 PSF
+                # tiles are actually found instead of silently falling back
+                # to an analytical/Gaussian PSF -- see the fix comment in
+                # synthetic_psf_generator.py::build_resolution_psf_cache.
+                _q1_cfg_dir = CONFIG.get('euclid_q1', {}).get('data_dir') if isinstance(CONFIG, dict) else None
+                _q1_tiles_dir = (Path(_q1_cfg_dir) / 'tiles') if _q1_cfg_dir else None
                 resolution_psf_cache[_rname] = _build_resolution_psf_cache(
-                    _rname, _bands, _ps, psf_size=101, cache_dir=_psf_cache_dir
+                    _rname, _bands, _ps, psf_size=101, cache_dir=_psf_cache_dir,
+                    q1_psf_dir=_q1_tiles_dir,
                 )
             print(f"✓ Synthetic PSF cache built: {sorted(resolution_psf_cache.keys())}")
         elif _telescopes_needed and not SYNTHETIC_PSF_AVAILABLE:
