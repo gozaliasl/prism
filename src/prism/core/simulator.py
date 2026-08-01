@@ -6271,12 +6271,24 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                 _add_e1, _add_e2 = ellipticity(_add_q, _add_pa)
                 _add_e1, _add_e2 = np.clip([_add_e1, _add_e2], -0.8, 0.8)
 
-                # Same lognormal size/index sampling used for the primary
-                # source, independently redrawn for this source.
-                _add_size_fraction = np.clip(
-                    rng.lognormal(np.log(size_frac_mean), size_frac_sigma),
-                    size_frac_min, size_frac_max)
-                _add_radius = theta_E * _add_size_fraction * np.clip((1 + _add_z) ** (-1.2), 0.1, 1.0)
+                # FIX (regression from adversarial audit finding C-6 fix,
+                # 2026-08-01): this block referenced size_frac_mean/sigma/
+                # min/max, which no longer exist since the primary source's
+                # sizing was switched from theta_E*fraction to a physical
+                # mass-size relation (see the fix above) -- this caused a
+                # NameError crashing every multi-source render (confirmed
+                # by execution: "NameError: name 'size_frac_mean' is not
+                # defined" on every attempt). Apply the same physical
+                # size-mass-redshift approach here for consistency: sample
+                # an independent stellar mass for this extra source and
+                # derive its angular size from mass_size_relation(), same
+                # as the primary source.
+                _add_logM = float(np.clip(rng.normal(
+                    CONFIG.get('tng_mode', {}).get('source_logM_default', 9.5),
+                    CONFIG.get('tng_mode', {}).get('source_logM_scatter', 0.5),
+                ), 8.0, 11.0))
+                _add_reff_kpc = mass_size_relation(_add_logM, _add_z, rng)
+                _add_radius = convert_physical_to_angular_radius(_add_reff_kpc, _add_z)
                 _add_radius = float(np.clip(_add_radius, _src_r_min * 0.6, 0.8))
                 _add_n = float(np.clip(rng.lognormal(np.log(1.2), 0.4), 0.8, 4.0))
 
@@ -7424,16 +7436,25 @@ def simulate_lens_system_with_time_delays(row, band_cfgs, rng, field_pop=None,
             fixed_n_lens = min(float(fixed_n_lens), 2.0)
 
     # FIXED: Generate source parameters ONCE
+    # FIX (adversarial audit finding C-6, 2026-08-01): this path (used by
+    # the time-delay generator) still had the theta_E*fraction source-
+    # sizing this project already replaced elsewhere for the exact same
+    # reason -- source angular size should come from the source's OWN
+    # stellar mass/redshift, not a foreground deflector's Einstein radius
+    # (physically unrelated systems; also an ML shortcut risk). Sample the
+    # source's target stellar mass ONCE (moved up from the TNG-lookup
+    # block below) and use mass_size_relation()/
+    # convert_physical_to_angular_radius() for the default case too, with
+    # the TNG match (if found) still overriding as before.
     source_z = float(row.get("source_redshift", row.get("zs", 2.0)))
-    size_frac_mean = geo.get('source_fraction_mean', 0.12)
-    size_frac_sigma = geo.get('source_fraction_sigma', 0.45)
-    size_frac_min = geo.get('source_fraction_min', 0.02)
-    size_frac_max = geo.get('source_fraction_max', 0.4)
-    size_fraction = np.clip(rng.lognormal(np.log(size_frac_mean), size_frac_sigma),
-                           size_frac_min, size_frac_max)
-    base_source_radius = theta_E * size_fraction
-    size_evolution_factor = np.clip((1 + source_z)**(-1.2), 0.1, 1.0)
-    fixed_source_radius = base_source_radius * size_evolution_factor
+    _tng_cfg = CONFIG.get('tng_mode', {}) if isinstance(CONFIG, dict) else {}
+    _source_logM = float(rng.normal(
+        _tng_cfg.get('source_logM_default', 9.5),
+        _tng_cfg.get('source_logM_scatter', 0.5),
+    ))
+    _source_logM = np.clip(_source_logM, 8.0, 11.0)
+    _src_reff_kpc = mass_size_relation(_source_logM, source_z, rng)
+    fixed_source_radius = convert_physical_to_angular_radius(_src_reff_kpc, source_z)
     if geo.get('enforce_source_smaller_than_lens', True):
         max_ratio = geo.get('max_source_to_lens_ratio', 0.6)
         max_allowed = fixed_lens_radius * max_ratio
@@ -7446,12 +7467,6 @@ def simulate_lens_system_with_time_delays(row, band_cfgs, rng, field_pop=None,
     # lensed source ONCE, same pattern as
     # simulate_complete_lens_system_with_real_fields (no catalog mass for
     # sources, so a target stellar mass is sampled from config).
-    _tng_cfg = CONFIG.get('tng_mode', {}) if isinstance(CONFIG, dict) else {}
-    _source_logM = float(rng.normal(
-        _tng_cfg.get('source_logM_default', 9.5),
-        _tng_cfg.get('source_logM_scatter', 0.5),
-    ))
-    _source_logM = np.clip(_source_logM, 8.0, 11.0)
     _tng_source = query_tng_properties(source_z, _source_logM, rng, CONFIG, exclude_subhalos=_used_tng_subhalos)
     if _tng_source is not None:
         fixed_source_radius = convert_physical_to_angular_radius(
@@ -9329,16 +9344,27 @@ def read_combined_cosmos_catalogs(structural_path, analysis_path=None):
     conv["source_axis_ratio"] = pd.Series(np.clip(np.random.beta(1.8, 1.8, base_len)*0.8 + 0.2, 0.2, 0.98))
     conv["source_pa"] = pd.Series(np.random.uniform(-180, 180, base_len))
     
-    # Use geometry config for source size generation
-    geo = CONFIG.get('geometry', {})
-    size_frac_mean = geo.get('source_fraction_mean', 0.12)
-    size_frac_sigma = geo.get('source_fraction_sigma', 0.45)
-    size_frac_min = geo.get('source_fraction_min', 0.02)
-    size_frac_max = geo.get('source_fraction_max', 0.4)
-    
-    size_fraction = np.random.lognormal(np.log(size_frac_mean), size_frac_sigma, base_len)
-    size_fraction_clipped = np.clip(size_fraction, size_frac_min, size_frac_max)
-    conv["source_radius"] = conv["theta_E"] * pd.Series(size_fraction_clipped)
+    # Source size generation.
+    # FIX (adversarial audit finding C-6, 2026-08-01): this catalog-level
+    # column (feeds create_parameter_variations' per-variation source_radius
+    # jitter, see base_row.get("source_radius") there) used the same
+    # theta_E*fraction sizing this project already replaced elsewhere in
+    # the per-render path, for the same reason: source angular size should
+    # come from the source's own stellar mass/redshift, not the deflector's
+    # Einstein radius. mass_size_relation()/convert_physical_to_angular_
+    # radius() take scalar arguments, so this is a per-row loop (a one-time
+    # catalog-build cost, not a per-image-render cost).
+    _tng_cfg_vec = CONFIG.get('tng_mode', {}) if isinstance(CONFIG, dict) else {}
+    _src_logM_mean = _tng_cfg_vec.get('source_logM_default', 9.5)
+    _src_logM_sigma = _tng_cfg_vec.get('source_logM_scatter', 0.5)
+    _vec_rng = np.random.default_rng(np.random.randint(0, 2**31 - 1))
+    _source_radii = np.empty(base_len)
+    _zs_arr = conv["source_redshift"].to_numpy()
+    for _i in range(base_len):
+        _logM_i = float(np.clip(_vec_rng.normal(_src_logM_mean, _src_logM_sigma), 8.0, 11.0))
+        _reff_kpc_i = mass_size_relation(_logM_i, float(_zs_arr[_i]), _vec_rng)
+        _source_radii[_i] = convert_physical_to_angular_radius(_reff_kpc_i, float(_zs_arr[_i]))
+    conv["source_radius"] = pd.Series(np.clip(_source_radii, 0.05, 0.8), index=conv.index)
 
     # Sanitize redshifts
     conv = sanitize_redshifts(conv)
@@ -10827,11 +10853,23 @@ Example usage:
                             if is_dark:
                                 lens_dark_count += 1
                         
-                        # Create filename with epoch suffix if time delays
+                        # Create filename with epoch suffix if time delays.
+                        # FIX (adversarial audit finding C-14, 2026-08-01):
+                        # 'cosmos_lens_*' vs 'cosmos_nonlens_*' reveals the
+                        # class label directly in the filename -- any
+                        # tooling that globs/sorts by filename (rather than
+                        # reading the actual is_lens column) gets the
+                        # answer for free, and it's an easy accidental
+                        # shortcut for a careless dataloader. Opt-in
+                        # (output.neutral_filenames) so existing tooling
+                        # that already depends on the lens/nonlens prefix
+                        # keeps working by default.
+                        _neutral_names = CONFIG.get('output', {}).get('neutral_filenames', False) if isinstance(CONFIG, dict) else False
+                        _fname_prefix = "cosmos_sample" if _neutral_names else "cosmos_lens"
                         if metadata.get('has_time_delays', False):
-                            filename_base = f"cosmos_lens_{idx + args.start_idx:06d}_epoch{epoch_idx:02d}"
+                            filename_base = f"{_fname_prefix}_{idx + args.start_idx:06d}_epoch{epoch_idx:02d}"
                         else:
-                            filename_base = f"cosmos_lens_{idx + args.start_idx:06d}"
+                            filename_base = f"{_fname_prefix}_{idx + args.start_idx:06d}"
                         
                         # Save outputs with resolution name and telescope-specific bands
                         # Use consistent normalization scales for time delay epochs
@@ -11089,8 +11127,20 @@ Example usage:
                     if is_dark:
                         nonlens_dark_count += 1
                     
-                    # Save outputs with resolution name
-                    filename_base = f"cosmos_nonlens_{idx + args.start_idx:06d}"
+                    # Save outputs with resolution name.
+                    # FIX (audit C-14): see identical fix + rationale on
+                    # the lens-save path above. A large offset is added to
+                    # the non-lens index under neutral naming so lens and
+                    # non-lens filenames don't collide now that they share
+                    # the same 'cosmos_sample_NNNNNN' prefix/numbering
+                    # space (the old distinct 'cosmos_lens_'/'cosmos_nonlens_'
+                    # prefixes made collisions impossible even with
+                    # identical indices).
+                    _neutral_names = CONFIG.get('output', {}).get('neutral_filenames', False) if isinstance(CONFIG, dict) else False
+                    if _neutral_names:
+                        filename_base = f"cosmos_sample_{idx + args.start_idx + 1_000_000:06d}"
+                    else:
+                        filename_base = f"cosmos_nonlens_{idx + args.start_idx:06d}"
                     save_success = save_complete_outputs(
                         filename_base, imgs, out_root, system_info, system_info,
                         system_type='nonlens', rng=rng,
