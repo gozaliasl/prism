@@ -4116,21 +4116,21 @@ def apply_real_jwst_colors_to_field_galaxies(field_galaxies, band, rng):
             band_galaxies.extend(kwargs_by_band[band])
             continue
 
-        # Clean metadata for lenstronomy (CRITICAL: Must remove all non-lenstronomy keys)
-        # These keys will cause Lenstronomy.SersicElliptic.function() to fail
-        metadata_keys = [
-            'field_redshift', 'real_morph_type', 'real_color_type',
-            'source_lens_id', 'original_redshift', 'original_magnitude',
-            'structural_quality', 'RA_DETEC', 'DEC_DETEC', 'psf_arrays',
-            'redshift', 'z', 'metallicity', 'age', 'sfr', 'dust_extinction',
-            'position_angle', 'axis_ratio', 'morphology', 'color_type',
-            'sep_arcsec', 'sep_pixels', 'x_image', 'y_image',
-            'env_type', 'is_synthetic', 'tng_info',
-            'use_galaxygenius_stamp', '_stamp_set', '_stamp_view', '_tng_particle_file',
-            '_generative_morph', '_morph_seed', '_morph_type_resolved'
-        ]
-        for key in metadata_keys:
-            gal_band.pop(key, None)
+        # Keep ONLY lenstronomy SERSIC_ELLIPSE kwargs (CRITICAL: any other key
+        # -- e.g. log_mass, stellar_mass, sim, snapshot, subhalo_id -- makes
+        # Lenstronomy.SersicElliptic.function() fail with an "unexpected
+        # keyword argument" TypeError). FIX (2026-08-01): this used to be a
+        # denylist of "known bad" metadata keys, which missed 'log_mass'
+        # (added to the field-galaxy dict by sample_cosmos_field_galaxies)
+        # and crashed every render that used the real-COSMOS-bootstrap field
+        # population -- an allowlist can't silently miss a newly-added key
+        # the same way.
+        _sersic_ellipse_keys = {
+            'center_x', 'center_y', 'e1', 'e2', 'R_sersic', 'n_sersic', 'magnitude',
+        }
+        for key in list(gal_band.keys()):
+            if key not in _sersic_ellipse_keys:
+                gal_band.pop(key, None)
 
         band_galaxies.append(gal_band)
     
