@@ -6546,6 +6546,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             for b in UPPER_BANDS
         }
     elif _lens_particle_file is not None:
+        print(f"[TNG_PARTICLE] Using local star-particle cutout for lens light: {_lens_particle_file.name}")
         _lens_morph_type = None
         lens_fragment = ["INTERPOL"]
         # Mass-light orientation consistency: derive the lens light's PA
@@ -6656,6 +6657,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             for b in UPPER_BANDS
         }
     elif _source_particle_file is not None:
+        print(f"[TNG_PARTICLE] Using local star-particle cutout for lensed source: {_source_particle_file.name}")
         source_fragment = ["INTERPOL"]
         _src_z = float(row.get("source_redshift", row.get("zs", 2.0)))
         _src_phi_G = 0.5 * np.arctan2(lensed_source['e2'], lensed_source['e1'])
