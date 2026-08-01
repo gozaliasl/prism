@@ -326,43 +326,54 @@ class DetectorChain:
         # 1. Convert to total electrons accumulated during exposure
         im_e = im * self.t_exp
 
-        # 2. IPC — charge coupling between adjacent pixels (HgCdTe only)
+        # 2. PRNU / flat-field pixel-to-pixel QUANTUM EFFICIENCY variation.
+        # FIX (adversarial audit finding C-8, 2026-08-01): this used to run
+        # as step 10, AFTER Poisson shot noise (7) and read/1-f noise (8) --
+        # so PRNU was multiplying the READ NOISE too, which is unphysical:
+        # read noise originates in the amplifier/readout chain, downstream
+        # of the photon-to-electron conversion, and does not depend on
+        # per-pixel QE. PRNU represents variation in how many incident
+        # photons get converted to electrons in the FIRST place, so it must
+        # scale the SIGNAL (and, correctly, everything derived from it
+        # including its own Poisson variance) before any detector-noise
+        # term is added, not after.
+        if self.enabled['prnu']:
+            im_e = self._apply_prnu(im_e)
+
+        # 3. IPC — charge coupling between adjacent pixels (HgCdTe only)
         if self.enabled['ipc'] and self._ipc_kernel is not None:
             im_e = self._apply_ipc(im_e)
 
-        # 3. Charge diffusion — sub-pixel Gaussian broadening
+        # 4. Charge diffusion — sub-pixel Gaussian broadening
         if self.enabled['charge_diffusion'] and self._cd_kernel is not None:
             im_e = self._apply_charge_diffusion(im_e)
 
-        # 4. Brighter-fatter effect — flux-dependent PSF broadening
+        # 5. Brighter-fatter effect — flux-dependent PSF broadening
         if self.enabled['brighter_fatter']:
             im_e = self._apply_brighter_fatter(im_e)
 
-        # 5. Non-linearity — polynomial detector response curve
+        # 6. Non-linearity — polynomial detector response curve
         if self.enabled['nonlinearity']:
             im_e = self._apply_nonlinearity(im_e)
 
-        # 6. Dark current — thermal electrons accumulated during integration
+        # 7. Dark current — thermal electrons accumulated during integration
         if self.enabled['dark_current']:
             im_e = self._apply_dark_current(im_e)
 
-        # 7. Poisson shot noise on signal + background
+        # 8. Poisson shot noise on signal + background
         if self.enabled['poisson_shot_noise']:
             im_e = self._apply_poisson_noise(im_e)
 
-        # 8. Read noise + structured 1/f noise
+        # 9. Read noise + structured 1/f noise (amplifier-stage, downstream
+        # of PRNU/QE by construction -- not scaled by it).
         if self.enabled['read_noise']:
             im_e = self._apply_read_noise(im_e)
         if self.enabled['one_f_noise']:
             im_e = self._apply_one_f_noise(im_e)
 
-        # 9. Saturation clipping (before gain so it's in electrons)
+        # 10. Saturation clipping (before gain so it's in electrons)
         if self.enabled['saturation']:
             im_e = np.minimum(im_e, float(p['full_well']))
-
-        # 10. PRNU / flat-field pixel-to-pixel sensitivity variations
-        if self.enabled['prnu']:
-            im_e = self._apply_prnu(im_e)
 
         # 11. Persistence from previous bright exposures
         if self.enabled['persistence'] and self.persistence_map is not None:
@@ -414,12 +425,43 @@ class DetectorChain:
             return im_e
         # Extra sigma in pixels from BFE for each pixel
         extra_sigma = np.sqrt(np.maximum(alpha * im_e, 0.0))
-        # Apply a mild spatial blur proportional to mean flux
-        mean_extra = float(np.percentile(extra_sigma, 95))
-        if mean_extra < 0.01:
+        extra_sigma = np.clip(extra_sigma, 0.0, 1.5)
+        if float(extra_sigma.max()) < 0.01:
             return im_e
-        k = _charge_diff_kernel(np.clip(mean_extra, 0.05, 1.5))
-        return fftconvolve(im_e, k, mode='same')
+
+        # FIX (adversarial audit finding C-8, 2026-08-01): this used to
+        # collapse extra_sigma to a SINGLE GLOBAL scalar
+        # (np.percentile(extra_sigma, 95)) and convolve the WHOLE frame
+        # with one uniform kernel at that strength -- so one bright pixel
+        # anywhere (e.g. the lens core) set the blur strength applied to
+        # every faint field galaxy and empty-sky pixel in the same image,
+        # and since lens/non-lens classes have different flux
+        # distributions, this produced a systematically different
+        # effective PSF per class (an ML shortcut-learning risk).
+        #
+        # True per-pixel spatially-varying convolution isn't directly
+        # expressible as one fftconvolve call; approximate it by
+        # quantizing the per-pixel extra_sigma into a small number of
+        # discrete bins, convolving the WHOLE frame once per bin at that
+        # bin's representative sigma, and compositing each bin's own
+        # pixels from its own blurred version. This keeps faint/empty
+        # regions at their own (near-zero) blur while bright regions still
+        # get their own locally-appropriate blur.
+        n_bins = 4
+        bin_edges = np.linspace(0.0, float(extra_sigma.max()), n_bins + 1)
+        out = np.array(im_e, dtype=np.float64, copy=True)
+        for i in range(n_bins):
+            lo, hi = bin_edges[i], bin_edges[i + 1]
+            sigma_i = 0.5 * (lo + hi)
+            if sigma_i < 0.05:
+                continue  # negligible blur, leave those pixels as-is
+            mask = (extra_sigma >= lo) & (extra_sigma <= hi if i == n_bins - 1 else extra_sigma < hi)
+            if not mask.any():
+                continue
+            k = _charge_diff_kernel(sigma_i)
+            blurred = fftconvolve(im_e, k, mode='same')
+            out = np.where(mask, blurred, out)
+        return out
 
     def _apply_nonlinearity(self, im_e: np.ndarray) -> np.ndarray:
         """
