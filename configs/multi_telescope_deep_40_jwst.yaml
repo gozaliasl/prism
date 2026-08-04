@@ -1,0 +1,535 @@
+n_lenses: 33
+n_non_lenses: 0
+variations_per_base: 1
+n_field_max: 500
+ml_training:
+  standard:
+    n_lenses: 50000
+    n_non_lenses: 50000
+    variations_per_base: 115
+    description: Standard ML training dataset with empirical variations
+  large_scale:
+    n_lenses: 100000
+    n_non_lenses: 100000
+    variations_per_base: 230
+    description: Large-scale ML training dataset for robust models
+  quick:
+    n_lenses: 10000
+    n_non_lenses: 10000
+    variations_per_base: 23
+    description: Quick ML training dataset for testing
+  production:
+    n_lenses: 5000
+    n_non_lenses: 5000
+    variations_per_base: 12
+    description: Production dataset for paper validation
+image_size: 300
+pixel_scale: 0.031
+multi_resolution:
+  enabled: false
+  scales:
+  - name: ground_based
+    pixel_scale: 0.2
+    description: Ground-based resolution
+  - name: roman
+    pixel_scale: 0.11
+    description: Roman Space Telescope resolution
+  - name: euclid
+    pixel_scale: 0.1
+    description: Medium resolution (Euclid)
+  - name: jwst
+    pixel_scale: 0.031
+    description: High resolution (JWST)
+sersic_range:
+- 0.3
+- 6.0
+magnitude_range:
+- 18.0
+- 28.0
+morphology:
+  multicomponent_enabled: false
+  apply_to_lens: true
+  apply_to_source: true
+  components:
+    bulge:
+      n_sersic: 4.0
+      r_frac: 0.25
+      q_boost: 0.3
+    disk:
+      n_sersic: 1.0
+      r_frac: 1.0
+      r_frac_source: 1.15
+    bar:
+      n_sersic: 0.5
+      r_frac: 0.4
+      q: 0.25
+    ring:
+      n_sersic: 0.5
+      r_frac: 0.8
+    bulge_secondary:
+      n_sersic: 4.0
+      r_frac: 0.6
+      offset_frac:
+      - 0.3
+      - 0.8
+  bt_fractions:
+    elliptical: 0.9
+    s0: 0.85
+    spiral: 0.175
+    late_spiral: 0.14
+    barred_spiral: 0.14
+    edge_on: 0.21
+    ring: 0.14
+    post_merger: 0.175
+  band_weight_bulge_like:
+    F115W: 1.0
+    F150W: 1.0
+    F200W: 1.0
+    F277W: 1.0
+    F356W: 1.0
+    F444W: 1.0
+photometry:
+  lens_mag_min: 18.0
+  lens_mag_max: 24.0
+  source_mag_min: 19
+  source_mag_max: 27.5
+  min_source_fainter_than_lens_mag: 1.2
+  source_mag_diff_min: 1.5
+  source_mag_diff_max: 5.0
+  lens_base_mag_zero: 21.0
+  lens_redshift_log_slope: 0.8
+  source_base_mag: 20.5
+catalogs:
+  galaxy_catalog: /Volumes/exthd-prism/prism-data/catalogs/cosmos/galaxy_catalog.fits
+geometry:
+  lens_radius_min: 0.35
+  lens_radius_max: 2.2
+  use_catalog_lens_radius: true
+  frame_radius_max_arcsec: 4.5
+  min_environment_avoidance_arcsec: 0.35
+  lens_size_scaling:
+    r0_kpc: 5.2
+    alpha_mass: 0.75
+    beta_redshift: -1.2
+    reference_mass: 11.2
+    reference_z: 0.6
+    mix_catalog_weight: 0.35
+    kpc_min: 1.2
+    kpc_max: 18.0
+    log_scatter: 0.18
+  source_fraction_mean: 0.12
+  source_fraction_sigma: 0.45
+  source_fraction_min: 0.02
+  source_fraction_max: 0.4
+  enforce_source_smaller_than_lens: true
+  max_source_to_lens_ratio: 0.6
+  allow_magnified_arcs_larger_than_lens: true
+  min_magnification: 5.0
+  max_magnification: 15.0
+  group_scale_theta_E:
+    enabled: false
+  force_caustic_source_position: false
+redshifts:
+  lens_min: 0.3
+  lens_max: 0.8
+  source_min: 1.0
+  source_max: 6.0
+  enforce_source_behind_lens: true
+  min_delta_z: 0.5
+multi_source:
+  enabled: false
+  n_sources_probs:
+  - 0.4
+  - 0.3
+  - 0.15
+  - 0.1
+  - 0.05
+  extra_source_z_offset_range:
+  - 0.3
+  - 2.5
+mass:
+  lens_mass_min: 11.5
+  lens_mass_max: 12.0
+  use_mass_theta_E_correlation: true
+subhalos:
+  enabled: false
+  count_range:
+  - 3
+  - 12
+  mass_function_slope: 1.9
+  mass_range_log10_host:
+  - -4.5
+  - -2.0
+  mass_fraction_of_host: 0.01
+  concentration_relation: duffy2008
+  max_radius_einstein_units: 3.0
+  profile: NFW
+binary_lenses:
+  enabled: false
+lens_class_distribution:
+  enabled: true
+  single_field:
+    fraction: 1.0
+    description: Single field galaxy lens (SIE or NFW + optional shear)
+  group:
+    fraction: 0.0
+    description: disabled for single-lens comparison
+  binary_sie_sie:
+    fraction: 0.0
+    description: disabled for single-lens comparison
+  binary_nfw_nfw:
+    fraction: 0.0
+    description: disabled for single-lens comparison
+  binary_shear_only:
+    fraction: 0.0
+    description: disabled for single-lens comparison
+mass_size:
+  data_dir: /Volumes/exthd-prism/prism-data/catalogs/relations
+  lens_relation_mix:
+    cowls_fraction: 0.0
+    cwmgs_fraction: 1.0
+  fallback_global:
+    slope: 0.387
+    intercept: -3.843
+    size_evolution_exponent: -0.2
+  bgg_fraction: 0.15
+environment:
+  types:
+    isolated_field:
+      fraction: 0.45
+      galaxy_count_mean: 2.5
+      galaxy_count_std: 1.2
+      min_galaxies: 0
+      max_galaxies: 3
+      poisson_lambda: 1.4
+      separation_mean: 2.5
+      avoid_factor: 1.25
+      max_radius_arcsec: 3.0
+      shear_min: 0.01
+      shear_max: 0.05
+    galaxy_pair:
+      fraction: 0.35
+      galaxy_count_mean: 3.0
+      galaxy_count_std: 1.3
+      min_galaxies: 1
+      max_galaxies: 4
+      separation_mean: 1.8
+      avoid_factor: 1.1
+      max_radius_arcsec: 3.5
+      shear_min: 0.03
+      shear_max: 0.08
+    group:
+      fraction: 0.2
+      galaxy_count_mean: 4.5
+      galaxy_count_std: 1.6
+      min_galaxies: 2
+      max_galaxies: 5
+      separation_mean: 1.2
+      avoid_factor: 1.0
+      max_radius_arcsec: 4.0
+      shear_min: 0.05
+      shear_max: 0.15
+field:
+  shared_fov_arcsec: 70.0
+  expected_density_per_arcsec2: 1.5
+  avoid_center_arcsec: 0.3
+  min_pair_separation_arcsec: 0.08
+  max_fraction_of_half_size: 0.9
+  min_count: 1
+  size_max_arcsec: 1.2
+  size_max_fraction_of_lens: 0.6
+galaxygenius_stamps:
+  enabled: false
+  fraction: 0.3
+  source_enabled: false
+  source_fraction: 0.3
+  source_size_scale_factor: 1.0
+  lens_enabled: false
+  lens_fraction: 0.3
+  lens_target_size_factor: 6.0
+  field_target_size_factor: 4.0
+tng_mode:
+  enabled: true
+  sim_mode: tng_mixed
+  local_catalog_path_tng50: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng50-1_local_catalog.parquet
+  local_catalog_path: /Volumes/exthd-prism/prism-data/catalogs/tng/tng_local_catalog/tng100-1_local_catalog.parquet
+  logM_tol: 0.3
+  max_attempts: 10
+  source_logM_default: 9.5
+  source_logM_scatter: 0.5
+  field_enabled: false
+  field_fraction: 0.3
+  field_logM_default: 9.5
+  field_logM_scatter: 0.6
+  environment_drives_field_count: false
+  particle_morphology:
+    enabled: true
+    light_engine: hydris
+    lens_enabled: true
+    lens_fraction: 1.0
+    source_enabled: true
+    source_fraction: 1.0
+    field_enabled: false
+    field_fraction: 1.0
+    companion_enabled: false
+    companion_fraction: 1.0
+    generative_enabled: false
+    min_particles: 1000
+strict_catalog:
+  use_catalog_only:
+    lens: true
+    source: true
+    field: true
+  required_fields:
+  - lens_redshift
+  - theta_E
+  missing_policy: synthesize
+  synthesize:
+    magnitudes: true
+    theta_E: true
+    geometry: true
+bands:
+- F115W
+- F150W
+- F277W
+- F444W
+band_presets:
+  default:
+    filters:
+    - F115W
+    - F150W
+    - F277W
+    - F444W
+    description: Standard 4-band JWST (NIRCam) - DEFAULT
+  thesis_multi_filter:
+    filters:
+    - F090W
+    - F150W
+    - F200W
+    - F356W
+    - F444W
+    description: 5-band for color/redshift impact studies (Aaron's thesis)
+  short_wavelength:
+    filters:
+    - F115W
+    - F150W
+    description: Short wavelength only (high-z optimization)
+  long_wavelength:
+    filters:
+    - F277W
+    - F356W
+    - F444W
+    description: Long wavelength only (dust/redshift penetration)
+band_centers:
+  F070W: 0.7
+  F090W: 0.9
+  F115W: 1.15
+  F150W: 1.5
+  F200W: 2.0
+  F277W: 2.77
+  F356W: 3.56
+  F444W: 4.44
+exposure_time: 1028.0
+magnitude_zero_point: 28.09
+noise:
+  sampling_method: distribution
+  F070W:
+    sky_brightness: 32.34
+    background_level: 1.79e-05
+    background_rms: 0.0417
+    read_noise: 0.0294
+  F090W:
+    sky_brightness: 31.19
+    background_level: 5.17e-05
+    background_rms: 0.0343
+    read_noise: 0.02416
+  F115W:
+    sky_brightness: 30.07
+    background_level: 0.0001448
+    background_rms: 0.0283
+    read_noise: 0.01996
+  F150W:
+    sky_brightness: 28.86
+    background_level: 0.0004446
+    background_rms: 0.023
+    read_noise: 0.01623
+  F277W:
+    sky_brightness: 28.02
+    background_level: 0.000956
+    background_rms: 0.00849
+    read_noise: 0.0059
+  F356W:
+    sky_brightness: 28.03
+    background_level: 0.0009484
+    background_rms: 0.00924
+    read_noise: 0.00644
+  F200W:
+    sky_brightness: 28.47
+    background_level: 0.000636
+    background_rms: 0.01438
+    read_noise: 0.01006
+  F444W:
+    sky_brightness: 28.04
+    background_level: 0.00094
+    background_rms: 0.01007
+    read_noise: 0.00704
+read_noise: 12.0
+sky_brightness: 27.0
+output_dir: outputs
+save_npy: true
+save_jpg: true
+save_catalogs: true
+save_intermediate_images: true
+output:
+  unified_storage: true
+  skip_empty_images: true
+  min_total_flux: 1.0e-07
+  min_source_flux: 1.0e-08
+  save_intermediate_rgb_jpg: true
+  stacked_npy:
+    enabled: true
+    order:
+    - lens_only
+    - sources_only
+    - lens_sources
+    - field_only
+    - final
+  save_fits: false
+add_artifacts: true
+add_noise: true
+verify_output: true
+telescope: jwst
+fundamental_plane:
+  enabled: true
+  update_theta_E: false
+detector_chain:
+  enabled: true
+  effects:
+    ipc: true
+    charge_diffusion: true
+    brighter_fatter: true
+    nonlinearity: true
+    dark_current: true
+    poisson_shot_noise: true
+    read_noise: true
+    one_f_noise: true
+    saturation: true
+    prnu: true
+    persistence: false
+    gain_adc: true
+telescope_configs:
+  roman:
+    bands:
+    - ROMAN_F106
+    - ROMAN_F129
+    - ROMAN_F158
+    - ROMAN_F184
+    pixel_scale: 0.11
+    exposure_time: 146.0
+    magnitude_zero_point: 28.09
+    image_size: 128
+  euclid:
+    bands:
+    - EUCLID_VIS
+    - EUCLID_Y
+    - EUCLID_J
+    - EUCLID_H
+    pixel_scale: 0.1
+    exposure_time: 565.0
+    magnitude_zero_point: 25.58
+    image_size: 128
+    lens_population:
+      redshifts:
+        lens_min: 0.2
+        lens_max: 1.1
+        source_min: 1.0
+        source_max: 4.0
+        min_delta_z: 0.4
+      theta_E:
+        min: 0.45
+        max: 2.4
+        median: 0.88
+        log_scatter: 0.35
+      velocity_dispersion:
+        min: 180.0
+        max: 335.0
+      detected_fraction: 0.7
+      extended_theta_E:
+        min: 0.05
+        max: 2.4
+        median: 0.45
+        log_scatter: 0.6
+      extended_redshifts:
+        lens_min: 0.1
+        lens_max: 3.0
+        source_min: 1.0
+        source_max: 6.0
+        min_delta_z: 0.3
+  subaru:
+    bands:
+    - SUBARU_G
+    - SUBARU_R
+    - SUBARU_I
+    - SUBARU_Z
+    pixel_scale: 0.168
+    exposure_time: 600.0
+    magnitude_zero_point: 27.9
+    image_size: 128
+  lsst:
+    bands:
+    - LSST_G
+    - LSST_R
+    - LSST_I
+    - LSST_Z
+    pixel_scale: 0.2
+    exposure_time: 30.0
+    magnitude_zero_point: 27.79
+    image_size: 128
+    coadd_visits: 1
+euclid_q1:
+  enabled: true
+  data_dir: /Volumes/exthd-prism/prism-data/psf/euclid_q1
+  use_empirical_psf: true
+  use_population_priors: true
+  use_q1_photometry: true
+  use_q1_shear: true
+  resample_theta_E: true
+  shear_range:
+    min: 0.02
+    max: 0.2
+artifacts:
+  cosmic_rays: true
+  hot_pixels: true
+  saturation: true
+  intensity: moderate
+time_delays:
+  enabled: false
+  fraction_variable_sources: 0.1
+  source_types:
+    quasar:
+      fraction: 0.6
+      variability_amplitude: 1.5
+      variability_timescale: 50.0
+      use_drw: true
+      black_hole_mass: null
+    supernova:
+      fraction: 0.25
+      variability_amplitude: 2.0
+      variability_timescale: 18.0
+      use_sncosmo: true
+      sn_type: Ia
+    agn:
+      fraction: 0.15
+      variability_amplitude: 1.2
+      variability_timescale: 40.0
+      use_drw: true
+      black_hole_mass: null
+  epochs:
+    min_epochs: 4
+    max_epochs: 4
+    time_range_days: 200
+    random_epochs: false
+    optimize_epochs: true
+  catalog:
+    save_time_delay_metadata: true
+    include_light_curves: false

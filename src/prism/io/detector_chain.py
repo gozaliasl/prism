@@ -257,7 +257,8 @@ class DetectorChain:
                  numpix: int = 300,
                  persistence_map: np.ndarray = None,
                  seed_prnu: int = 0,
-                 enabled: dict = None):
+                 enabled: dict = None,
+                 n_exposures: int = 1):
 
         if telescope not in TELESCOPE_PARAMS:
             raise ValueError(f"Unknown telescope '{telescope}'. "
@@ -267,6 +268,14 @@ class DetectorChain:
         self.band      = band.upper()
         self.rng       = rng or np.random.default_rng(42)
         self.t_exp     = float(exposure_time)
+        # Real deep-field depth is built from N co-added sub-exposures, each
+        # individually well below the full-well capacity, not one continuous
+        # integration. Photon shot noise is invariant to this framing (Var of
+        # N summed Poisson draws of mean mu/N equals Var of one draw of mean
+        # mu), so signal/Poisson handling below is unchanged -- only the
+        # per-frame saturation check and read-noise stacking depend on N.
+        self.n_exposures = max(1, int(n_exposures))
+        self.t_exp_frame = self.t_exp / self.n_exposures
         self.numpix    = int(numpix)
         self.params    = TELESCOPE_PARAMS[telescope]
         self.persistence_map = persistence_map  # e-
@@ -371,9 +380,15 @@ class DetectorChain:
         if self.enabled['one_f_noise']:
             im_e = self._apply_one_f_noise(im_e)
 
-        # 10. Saturation clipping (before gain so it's in electrons)
+        # 10. Saturation clipping (before gain so it's in electrons).
+        # Real deep exposures co-add N sub-exposures, each individually
+        # capped at full_well; the stacked total can therefore reach
+        # N * full_well before any single frame actually saturates. Clipping
+        # the summed signal at a single full_well (as if it were one
+        # continuous integration of the full stacked duration) is what
+        # caused unphysical "dark image" rejections on bright lens cores.
         if self.enabled['saturation']:
-            im_e = np.minimum(im_e, float(p['full_well']))
+            im_e = np.minimum(im_e, float(p['full_well']) * self.n_exposures)
 
         # 11. Persistence from previous bright exposures
         if self.enabled['persistence'] and self.persistence_map is not None:
@@ -493,7 +508,11 @@ class DetectorChain:
 
     def _apply_read_noise(self, im_e: np.ndarray) -> np.ndarray:
         rn = self.params['read_noise_cds']
-        return im_e + self.rng.normal(0.0, rn, im_e.shape)
+        # Read noise is drawn once per real readout. Stacking N sub-exposures
+        # sums N independent read-noise draws, so the total variance scales
+        # with N (sigma scales with sqrt(N)) rather than being added once.
+        rn_stack = rn * np.sqrt(self.n_exposures)
+        return im_e + self.rng.normal(0.0, rn_stack, im_e.shape)
 
     def _apply_one_f_noise(self, im_e: np.ndarray) -> np.ndarray:
         """
@@ -581,7 +600,8 @@ def make_detector_chain(telescope: str, band: str,
                         numpix: int = 300,
                         persistence_map: np.ndarray = None,
                         seed_prnu: int = 0,
-                        enabled: dict = None) -> DetectorChain:
+                        enabled: dict = None,
+                        n_exposures: int = 1) -> DetectorChain:
     """
     Factory function. Returns a ready-to-use DetectorChain.
 
@@ -612,7 +632,8 @@ def make_detector_chain(telescope: str, band: str,
         telescope=telescope, band=band, rng=rng,
         exposure_time=exposure_time, numpix=numpix,
         persistence_map=persistence_map,
-        seed_prnu=seed_prnu, enabled=enabled
+        seed_prnu=seed_prnu, enabled=enabled,
+        n_exposures=n_exposures
     )
 
 

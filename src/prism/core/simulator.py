@@ -4296,21 +4296,49 @@ def choose_observed_band_for_rest(rest_um, z):
     return min(LOWER_BANDS, key=lambda b: abs(BAND_CENTERS_UM[b] - target))
 
 def extract_restframe_struct(struct_df, z_series, rest_um=1.6):
-    """Extract rest-frame structural parameters"""
+    """Extract rest-frame structural parameters.
+
+    FIX (2026-08-03, user-reported "lens orientation/shape differs between
+    telescopes"): this searched for structural columns (rearc_*/qratio_*/
+    nsersic_*) using LOWER_BANDS -- the ACTIVE TELESCOPE's band names (e.g.
+    'roman_f106'). The real COSMOS-Web structural catalog only ever has
+    JWST-band columns (rearc_f115w, qratio_f115w, ...), so for any non-JWST
+    telescope every lookup silently missed and every object fell through to
+    the hardcoded defaults (q=0.8, n=3.0, re=0.7"), discarding the galaxy's
+    real measured shape/orientation and substituting an isotropic default
+    that obviously doesn't match JWST's real-shape rendering of the same
+    object. The real structural measurements are a property of the observed
+    galaxy, not of which telescope is being simulated, so this must always
+    search the catalog's actual JWST-native bands regardless of the active
+    telescope.
+    """
     n = len(z_series)
     re_out = pd.Series(np.nan, index=range(n))
     q_out = pd.Series(np.nan, index=range(n))
     n_out = pd.Series(np.nan, index=range(n))
 
+    _struct_bands = [b for b in ["f115w", "f150w", "f277w", "f444w"]
+                      if any(f"{p}_{b}" in struct_df.columns for p in ("rearc", "qratio", "nsersic"))] \
+                     or LOWER_BANDS
+
+    def _choose_struct_band(z):
+        try:
+            z = float(z)
+        except Exception:
+            z = 0.6
+        z = max(z, 0.0)
+        target = rest_um * (1.0 + z)
+        return min(_struct_bands, key=lambda b: abs(ALL_BAND_CENTERS_UM.get(b, BAND_CENTERS_UM.get(b, target)) - target))
+
     # Per-object band selection for rest-frame
     for i, z in enumerate(z_series.values):
         if i >= len(struct_df):
             break
-        band = choose_observed_band_for_rest(rest_um, z)
-        
+        band = _choose_struct_band(z)
+
         for colname, series_out in [
             (f"rearc_{band}", re_out),
-            (f"qratio_{band}", q_out), 
+            (f"qratio_{band}", q_out),
             (f"nsersic_{band}", n_out),
         ]:
             if colname in struct_df.columns:
@@ -4324,7 +4352,7 @@ def extract_restframe_struct(struct_df, z_series, rest_um=1.6):
     # Fallback across all bands
     def best_across_bands(template, default):
         best = None
-        for b in LOWER_BANDS:
+        for b in _struct_bands:
             col = template.format(band=b)
             if col in struct_df.columns:
                 s = pd.to_numeric(struct_df[col], errors="coerce")
@@ -4506,15 +4534,47 @@ def create_jwst_band_configs(rng=None, use_distribution=True):
         # identical across bands (unphysical: NIRCam's per-filter
         # zeropoints genuinely differ with throughput/bandwidth).
         #
-        # Approximate published NIRCam AB zeropoints (STScI JDox pipeline
-        # reference values, imaging mode, e-/s -> AB mag); these are
-        # DEFAULT/PLACEHOLDER values good to ~0.1-0.3 mag -- verify against
-        # the current jwst_pipeline CRDS reference files before using for
-        # precision photometric science, and override via
-        # telescope_configs.<band>.magnitude_zero_point in config if exact
-        # per-visit calibration values are available.
+        # Approximate published per-band AB zeropoints (e-/s -> AB mag);
+        # these are DEFAULT/PLACEHOLDER values good to ~0.1-0.5 mag --
+        # verify against each mission's current calibration reference
+        # files before using for precision photometric science, and
+        # override via telescope_configs.<tel>.band_zero_points in config
+        # if exact per-visit calibration values are available.
+        #
+        # FIX (2026-08-02, user-reported): this table originally only had
+        # JWST's 4 bands -- every other telescope (Roman/Euclid/Subaru/
+        # LSST) silently fell through to ONE flat magnitude_zero_point for
+        # ALL of its bands (e.g. Roman ZP=28.1 identical across
+        # F106/F129/F158/F184), discarding the same real filter-dependent
+        # throughput information the original JWST-only fix was written
+        # to restore. Added band-specific approximate values for the
+        # other 4 telescopes from their public sensitivity/calibration
+        # references (Roman WFI imaging ETC; Euclid VIS/NISP Q1 release
+        # papers -- NISP Y/J/H are individually ~1.5 mag shallower than
+        # VIS; Subaru HSC deep-field grizy zeropoints, Aihara+2018/2022;
+        # LSST/Rubin single-visit zeropoints, Ivezic+2019).
         _default_band_zp = {
+            # JWST NIRCam (STScI JDox pipeline reference values)
             'F115W': 25.68, 'F150W': 25.97, 'F277W': 26.63, 'F444W': 26.32,
+            # Roman WFI (approximate, imaging ETC reference)
+            'ROMAN_F062': 26.14, 'ROMAN_F087': 26.34, 'ROMAN_F106': 26.44,
+            'ROMAN_F129': 26.40, 'ROMAN_F146': 27.29, 'ROMAN_F158': 26.35,
+            'ROMAN_F184': 25.90, 'ROMAN_F213': 25.44,
+            # Euclid VIS: Cropper et al. (Euclid II: The VIS Instrument),
+            # ZP=25.72 for nE=1/s (frequency-flat SED), matches prior estimate.
+            # Euclid NISP Y/J/H: real Table 3 values from Schirmer et al. 2022
+            # (Euclid preparation XVIII: The NISP photometric system,
+            # arXiv:2203.01650) -- corrects a 2026-08-02 estimate
+            # (24.10/24.15/24.05) that was ~1 mag too faint (wrong
+            # per-exposure vs per-second convention), which made Euclid
+            # NISP bands render ~2.5-3x too dim relative to the true SED.
+            'EUCLID_VIS': 25.76, 'EUCLID_Y': 25.04, 'EUCLID_J': 25.26, 'EUCLID_H': 25.21,
+            # Subaru HSC (deep-field grizy zeropoints)
+            'SUBARU_B': 27.30, 'SUBARU_V': 27.35, 'SUBARU_G': 27.50, 'SUBARU_R': 27.70,
+            'SUBARU_I': 27.60, 'SUBARU_Z': 27.00, 'SUBARU_Y': 26.75,
+            # LSST/Rubin single-visit zeropoints
+            'LSST_U': 26.52, 'LSST_G': 28.38, 'LSST_R': 28.16, 'LSST_I': 27.85,
+            'LSST_Z': 27.46, 'LSST_Y': 26.68,
         }
         _tel_name_bc = CONFIG.get('telescope', 'jwst').lower()
         _tel_cfg_bc  = CONFIG.get('telescope_configs', {}).get(_tel_name_bc, {})
@@ -5217,7 +5277,20 @@ def create_parameter_variations(base_catalog, variations_per_base=25, rng=None):
             base_offset = np.hypot(base_xs, base_ys)
             base_angle = np.arctan2(base_ys, base_xs) if base_offset > 1e-6 else rng.uniform(0, 2*np.pi)
 
-            offset_ratio = rng.beta(1.0, 8.0) * 0.6  # mean ~0.065, max 0.6
+            # WIDENED (2026-08-01, user-reported): Beta(1,8)*0.6 (mean~0.065)
+            # concentrates sources SO close to the caustic that essentially
+            # every system lands well above any reasonable magnification
+            # floor on the first draw -- combined with geometry.
+            # min_magnification, this produced a magnification pile-up (all
+            # 50 systems in a test batch landed within noise of exactly the
+            # floor value) instead of a real spread. Beta(1,5)*0.6
+            # (mean~0.10) sits between the two calibration points in the
+            # comment above (0.065->83-89% quad, 0.16->51% quad) -- wider
+            # spread in source position (and therefore magnification)
+            # while still biased toward the caustic. Re-verify the quad
+            # fraction against real COSMOS-Web (~86%) if that calibration
+            # matters for your use case; not re-validated here.
+            offset_ratio = rng.beta(1.0, 5.0) * 0.6  # mean ~0.10, max 0.6
             offset = offset_ratio * varied_row["theta_E"]
 
             varied_row["source_x"] = offset * np.cos(base_angle)
@@ -5905,6 +5978,38 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                 ))
                 row["lens_sigma_kms"] = _sigma_kms
 
+            # === REAL EUCLID Q1 THETA_E OVERRIDE (user-requested, 2026-08-02) ===
+            # For specific hand-picked lens_ids, replace the synthetic/FP-derived
+            # theta_E with a REAL fitted Einstein radius from Euclid Q1 (PyAutoLens
+            # modeling_lens_mass.csv, real confirmed lens detections), so those
+            # systems' lensing strength is genuinely observed, not simulated.
+            # Same self-consistency pattern as the group_scale_theta_E override
+            # above: back-solve sigma_kms from the SIS relation for the new value.
+            # Note: only theta_E (and lens sigma) are real; redshift and the
+            # background lensed source are still PRISM-synthesized (Q1's public
+            # modeling tables have no z or source-light fit) -- this is a
+            # transparently-labeled hybrid, not a fully-real system.
+            _q1_override_cfg = CONFIG.get('geometry', {}).get('q1_theta_E_override', {})
+            if _q1_override_cfg:
+                # row.name is the DataFrame row index from lens_catalog.iterrows(),
+                # which matches the sequential lens numbering used for output
+                # filenames (idx + args.start_idx) -- row['lens_id']/['ASSOC_ID']
+                # are the catalog's OWN identifier strings, not that index.
+                _lens_id_key = str(row.name)
+                if _lens_id_key in _q1_override_cfg:
+                    _theta_E_pre_q1 = float(theta_E)
+                    theta_E = float(_q1_override_cfg[_lens_id_key])
+                    if lens_model_list and lens_model_list[0] in ('SIE', 'SIS', 'SPEMD', 'SPP'):
+                        kwargs_lens[0]['theta_E'] = theta_E
+                    row["theta_E"] = float(theta_E)
+                    row["theta_E_pre_override"] = _theta_E_pre_q1
+                    row["theta_E_override_applied"] = True
+                    row["theta_E_source"] = "euclid_q1_real"
+                    _sigma_kms = float(2.998e5 * np.sqrt(
+                        max(theta_E, 1e-6) / 206265.0 / (4.0 * np.pi * max(_da_ls_over_ds, 1e-6))
+                    ))
+                    row["lens_sigma_kms"] = _sigma_kms
+
             # Re-derive the source position from the offset/theta_E ratio and
             # angle stored by create_parameter_variations, now that theta_E
             # has been finalized by the FP/FJ consistency step above. Without
@@ -5940,11 +6045,33 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         # Convert to angular radius
         lens_radius = convert_physical_to_angular_radius(reff_kpc, lens_z)
 
+        # FIX (2026-08-02, user-reported): strict_catalog.use_catalog_only
+        # was declared in default_config.yaml but never actually read
+        # anywhere in this module -- lens_radius was ALWAYS overwritten by
+        # mass_size_relation() regardless of a catalog-provided value, a
+        # real implementation gap relative to the documented config
+        # contract. When strict_catalog.use_catalog_only.lens is true and
+        # the row has a finite lens_radius, honor it directly instead.
+        if (CONFIG.get('strict_catalog', {}).get('use_catalog_only', {}).get('lens', False)
+                and row.get('lens_radius') is not None):
+            try:
+                _catalog_lens_radius = float(row['lens_radius'])
+                if np.isfinite(_catalog_lens_radius) and _catalog_lens_radius > 0:
+                    lens_radius = _catalog_lens_radius
+            except (TypeError, ValueError):
+                pass
+
         # Apply config bounds as safety limits.
         # Floor raised to 0.5" so Sérsic n~4 wings extend visibly beyond
         # the Einstein ring (real COSMOS-Web lenses show extended red halos).
         _lr_min = max(geo.get('lens_radius_min', 0.2), 0.5)
-        lens_radius = np.clip(lens_radius, _lr_min, geo.get('lens_radius_max', 4.0))
+        _strict_lens_radius = (
+            CONFIG.get('strict_catalog', {}).get('use_catalog_only', {}).get('lens', False)
+            and row.get('lens_radius') is not None
+        )
+        if not _strict_lens_radius:
+            lens_radius = np.clip(lens_radius, _lr_min, geo.get('lens_radius_max', 4.0))
+        row["lens_radius"] = float(lens_radius)
 
         n_lens = sample_sersic_n(lens_z, measured=row.get("n_rest"), rng=rng)
 
@@ -6068,6 +6195,13 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                                                              min_particles=_pm_cfg.get('min_particles'),
                                                              sim=_comp_sim)
 
+    # strict_catalog.use_catalog_only.source (2026-08-02): defined here,
+    # before first use below, so catalog-provided source_x/source_y/
+    # source_radius/source_mag_* are honored throughout the source-
+    # construction block that follows (mass_size_relation override, TNG
+    # override, safety clips, magnitude brightening, caustic resampling).
+    _strict_source = CONFIG.get('strict_catalog', {}).get('use_catalog_only', {}).get('source', False)
+
     # === LENSED SOURCE ===
     # Use fixed source parameters if provided (for time delay consistency)
     if fixed_lens_params is not None:
@@ -6123,6 +6257,18 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         _src_reff_kpc = mass_size_relation(_source_logM, source_z, rng)
         source_radius = convert_physical_to_angular_radius(_src_reff_kpc, source_z)
 
+        # FIX (2026-08-02, user-reported): same strict_catalog gap as
+        # lens_radius above -- honor a catalog-provided source_radius
+        # directly instead of always recomputing from mass_size_relation.
+        if (CONFIG.get('strict_catalog', {}).get('use_catalog_only', {}).get('source', False)
+                and row.get('source_radius') is not None):
+            try:
+                _catalog_source_radius = float(row['source_radius'])
+                if np.isfinite(_catalog_source_radius) and _catalog_source_radius > 0:
+                    source_radius = _catalog_source_radius
+            except (TypeError, ValueError):
+                pass
+
         # Soft rendering-stability cap (NOT a physical constraint): an
         # extremely large source relative to the lens light can produce
         # degenerate/numerically awkward caustic-crossing geometry. This
@@ -6137,8 +6283,12 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         
         # TNG Mode: replace the catalog-derived source radius with the
         # matched subhalo's actual stellar half-mass radius, projected to
-        # the source's redshift.
-        if _tng_source is not None:
+        # the source's redshift. Skipped under strict_catalog (2026-08-02)
+        # -- TNG still supplies the source's real particle-based light
+        # profile/morphology (see _source_particle_file below), just
+        # rescaled to the catalog's own source_radius instead of
+        # overriding the catalog's size with the matched subhalo's.
+        if _tng_source is not None and not _strict_source:
             source_radius = convert_physical_to_angular_radius(
                 _tng_source['halfmassrad_stars_kpc'], source_z
             )
@@ -6150,8 +6300,12 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         # Scale floor with θ_E: min ~ 0.20" × (θ_E / 0.5"), capped at 0.45".
         # Raised from v13's 0.15" floor — fragmented PSF chains were still
         # appearing for small sources with large θ_E (quad-image systems).
-        _src_r_min = float(np.clip(0.20 * (theta_E / 0.5), 0.20, 0.45))
-        source_radius = np.clip(source_radius, _src_r_min, 0.8)
+        # Skipped under strict_catalog so a deliberately small catalog
+        # source_radius isn't silently floored.
+        if not _strict_source:
+            _src_r_min = float(np.clip(0.20 * (theta_E / 0.5), 0.20, 0.45))
+            source_radius = np.clip(source_radius, _src_r_min, 0.8)
+        row["source_radius"] = float(source_radius)
 
         # Floor at n=0.8 (Gaussian-like disk): sources with n<0.8 render as
         # near-point-sources, producing fragmented PSF-dot chains when lensed
@@ -6180,15 +6334,18 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     # was previously undetectable from the output alone. Now flagged in
     # `row` so it's recorded in saved metadata and can be filtered out of
     # any luminosity-function/population-statistics use of the dataset.
+    # (_strict_source defined earlier, before the source-radius block.)
+
     row["source_mag_brightening_applied"] = False
-    for band in LOWER_BANDS:
-        src_mag = float(row.get(f"source_mag_{band}", 20.5))
-        if src_mag > phot.get('source_mag_max', 25.0):
-            print(f"[WARNING] Source too faint in {band}: {src_mag:.2f}")
-            # Adjust source to be brighter
-            row[f"source_mag_{band}"] = phot.get('source_mag_max', 25.0) - 0.5
-            row["source_mag_brightening_applied"] = True
-    
+    if not _strict_source:
+        for band in LOWER_BANDS:
+            src_mag = float(row.get(f"source_mag_{band}", 20.5))
+            if src_mag > phot.get('source_mag_max', 25.0):
+                print(f"[WARNING] Source too faint in {band}: {src_mag:.2f}")
+                # Adjust source to be brighter
+                row[f"source_mag_{band}"] = phot.get('source_mag_max', 25.0) - 0.5
+                row["source_mag_brightening_applied"] = True
+
     # v17 caustic multiplicity gate: source must be INSIDE the tangential caustic
     # (min_mu ≤ |μ| ≤ max_mu) to produce multiple images / arcs.
     # Previously only upper-bounded μ; lower bound now enforces multiplicity.
@@ -6207,10 +6364,10 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         _mu_raw = _min_mu
     # For binary lenses: check image count instead of just μ.
     # Source outside binary caustic → 2-3 images (blobs); inside → 4-5 images (arcs).
-    _needs_resample = (_mu_raw < _min_mu or _mu_raw > _max_mu)
-    if _geo_vis.get('force_caustic_source_position', False):
+    _needs_resample = (_mu_raw < _min_mu or _mu_raw > _max_mu) and not _strict_source
+    if _geo_vis.get('force_caustic_source_position', False) and not _strict_source:
         _needs_resample = True
-    if _is_binary and not _needs_resample:
+    if _is_binary and not _needs_resample and not _strict_source:
         try:
             from lenstronomy.LensModel.lens_model import LensModel as _LensModel
             _lm = _LensModel(lens_model_list=lens_model_list)
@@ -6367,11 +6524,44 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     # number, so density stays realistic at any image_size (e.g. a 1'
     # extended-FOV render) instead of reusing a count tuned for a much
     # smaller field.
-    _area_scale = field_density_area_scale(numpix, pixel_scale, CONFIG)
-    env_mean, env_std = field_galaxy_count_target(numpix, pixel_scale, env_params, CONFIG)
+    #
+    # Multi-telescope consistency fix (2026-08-02, user-reported: "the field
+    # of each lens should be identical for all telescopes... common overlap
+    # must have identical galaxies"): field-galaxy count/positions were
+    # previously drawn from the SAME shared `rng` stream used for every other
+    # telescope-dependent step, sized to THIS run's own numpix*pixel_scale.
+    # Two different telescope configs (or two different image sizes for the
+    # same telescope) rendering the "same" lens_id therefore drew a different
+    # number of field galaxies at different box sizes, desyncing the RNG and
+    # producing a completely different field realization each time. Fix:
+    # draw field galaxies with a RNG seeded only by lens_id (independent of
+    # telescope/config), over a FIXED reference FOV box (field.shared_fov_arcsec,
+    # sized to the largest planned render e.g. 1'), so every telescope/config
+    # for a given lens_id draws the identical physical field; each telescope
+    # then naturally only *renders* whichever of those galaxies fall inside
+    # its own (possibly smaller) FOV, since positions are in arcsec and
+    # off-canvas sources simply don't contribute flux to that canvas.
+    # FIX (2026-08-03, user-reported "different orientation per telescope"):
+    # row.get('ASSOC_ID', row.get('lens_id', 0)) silently returned the
+    # default 0 for EVERY lens -- neither key is actually present on `row`
+    # at this point in the pipeline, so every single lens (not just across
+    # telescopes) was drawing its field population from an identical seed=0
+    # RNG stream. row.name (the DataFrame index from lens_catalog.iterrows(),
+    # confirmed present and used for the same purpose by the Q1 theta_E
+    # override fix above) is the reliable per-lens identifier here.
+    _lens_id_for_field_seed = row.get('ASSOC_ID', row.get('lens_id', row.name))
+    field_rng = np.random.default_rng(zlib.crc32(str(_lens_id_for_field_seed).encode()) % (2**31))
+    _shared_fov_arcsec = float(CONFIG.get('field', {}).get('shared_fov_arcsec', 0.0)) if isinstance(CONFIG, dict) else 0.0
+    if _shared_fov_arcsec > 0:
+        _field_numpix, _field_pixel_scale = 2000, _shared_fov_arcsec / 2000.0
+    else:
+        _field_numpix, _field_pixel_scale = numpix, pixel_scale
+
+    _area_scale = field_density_area_scale(_field_numpix, _field_pixel_scale, CONFIG)
+    env_mean, env_std = field_galaxy_count_target(_field_numpix, _field_pixel_scale, env_params, CONFIG)
     env_min  = max(0.0, env_mean - 3 * env_std)
     env_max  = env_mean + 3 * env_std
-    n_field_env = int(np.clip(rng.normal(env_mean, env_std), env_min, env_max))
+    n_field_env = int(np.clip(field_rng.normal(env_mean, env_std), env_min, env_max))
 
     # TNG Mode: if a matched lens subhalo's FoF group environment is
     # available, let it (optionally) set the *richness class*, then redraw
@@ -6388,10 +6578,10 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             'rich_group': 6.5,
         }.get(tng_env, 2.5)
         env_mean, env_std = field_galaxy_count_target(
-            numpix, pixel_scale, {'galaxy_count_mean': _tng_richness}, CONFIG)
+            _field_numpix, _field_pixel_scale, {'galaxy_count_mean': _tng_richness}, CONFIG)
         env_min = max(0.0, env_mean - 3 * env_std)
         env_max = env_mean + 3 * env_std
-        n_field_env = int(np.clip(rng.normal(env_mean, env_std), env_min, env_max))
+        n_field_env = int(np.clip(field_rng.normal(env_mean, env_std), env_min, env_max))
 
     # Clamp to n_field_max
     n_field_env = min(max(0, n_field_env), n_field_max)
@@ -6409,7 +6599,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
     elif field_pop is not None:
         # Get lens ID for lens-specific field galaxy sampling
         lens_id = row.get('ASSOC_ID', row.get('lens_id', None))
-        
+
         # Use enhanced field sampling if available
         # For large FOV (n_field_env > 10) bypass ENHANCED_SAMPLER which has
         # hardcoded small-field caps; use the synthetic generator at the correct
@@ -6420,9 +6610,9 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                     central_redshift=lens_z,
                     central_mass_log10=lens_mass_log10,
                     n_max=n_field_env,
-                    rng=rng,
-                    numpix=numpix,
-                    pixel_scale=pixel_scale,
+                    rng=field_rng,
+                    numpix=_field_numpix,
+                    pixel_scale=_field_pixel_scale,
                     avoid_center_arcsec=avoid_radius,
                     psf_data=psf_data,
                     lens_radius=lens_radius,
@@ -6432,8 +6622,8 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             except Exception as e:
                 print(f"[WARNING] Enhanced sampling failed: {e}, falling back to basic sampling")
                 field_galaxies_base = sample_real_field_galaxies_for_mock(
-                    field_pop, n_max=n_field_env, rng=rng, numpix=numpix,
-                    pixel_scale=pixel_scale, lens_redshift=lens_z,
+                    field_pop, n_max=n_field_env, rng=field_rng, numpix=_field_numpix,
+                    pixel_scale=_field_pixel_scale, lens_redshift=lens_z,
                     avoid_center_arcsec=avoid_radius,
                     psf_data=psf_data,
                     lens_radius=lens_radius,
@@ -6444,8 +6634,8 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
         else:
             # Use basic field sampling
             field_galaxies_base = sample_real_field_galaxies_for_mock(
-                field_pop, n_max=n_field_env, rng=rng, numpix=numpix,
-                pixel_scale=pixel_scale, lens_redshift=lens_z,
+                field_pop, n_max=n_field_env, rng=field_rng, numpix=_field_numpix,
+                pixel_scale=_field_pixel_scale, lens_redshift=lens_z,
                 avoid_center_arcsec=avoid_radius,
                 psf_data=psf_data,
                 lens_radius=lens_radius,
@@ -6455,18 +6645,17 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
             )
     elif n_field_env > 10:
         # Large-FOV mode: generate synthetic population spread across full image
-        _pix_scale = CONFIG.get('pixel_scale', 0.031) if isinstance(CONFIG, dict) else 0.031
         field_galaxies_base = generate_synthetic_field_population(
-            rng, n_field_env, numpix, pixel_scale=_pix_scale, env_type=env_type, lens_z=lens_z)
-        print(f"[INFO] Large-FOV synthetic field: {len(field_galaxies_base)} galaxies over {numpix*_pix_scale:.0f}\"")
+            field_rng, n_field_env, _field_numpix, pixel_scale=_field_pixel_scale, env_type=env_type, lens_z=lens_z)
+        print(f"[INFO] Large-FOV synthetic field: {len(field_galaxies_base)} galaxies over {_field_numpix*_field_pixel_scale:.0f}\"")
     else:
         field_galaxies_base = generate_synthetic_field_population(
-            rng, max(n_field_env, 2), numpix, env_type=env_type, lens_z=lens_z)
+            field_rng, max(n_field_env, 2), _field_numpix, pixel_scale=_field_pixel_scale, env_type=env_type, lens_z=lens_z)
         print(f"[INFO] Using synthetic field galaxies for {env_type} environment")
 
-    apply_tng_field_overrides(field_galaxies_base, rng, CONFIG, exclude_subhalos=_used_tng_subhalos)
-    tag_field_galaxies_with_galaxygenius_stamps(field_galaxies_base, rng, CONFIG)
-    tag_field_galaxies_with_tng_particles(field_galaxies_base, rng, CONFIG)
+    apply_tng_field_overrides(field_galaxies_base, field_rng, CONFIG, exclude_subhalos=_used_tng_subhalos)
+    tag_field_galaxies_with_galaxygenius_stamps(field_galaxies_base, field_rng, CONFIG)
+    tag_field_galaxies_with_tng_particles(field_galaxies_base, field_rng, CONFIG)
     n_field_added = len(field_galaxies_base)
 
     # === OPTIONAL: DARK-MATTER SUBHALO PERTURBERS (NFW) ===
@@ -7147,6 +7336,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                 continue
 
             exposure_time = float(CONFIG.get('exposure_time', 1028.0))
+            _n_exposures = int(CONFIG.get('n_exposures', 1))
 
             if DETECTOR_CHAIN_AVAILABLE and _det_enabled:
                 # FIX (adversarial audit finding C-8.2, 2026-08-01; this
@@ -7190,6 +7380,7 @@ def simulate_complete_lens_system_with_real_fields(row, band_cfgs, rng, field_po
                     persistence_map=_persistence_carry,
                     seed_prnu=_prnu_seed,
                     enabled=_det_overrides if _det_overrides else None,
+                    n_exposures=_n_exposures,
                 )
                 final_image = chain.apply(_image_plus_sky)
                 if _det_overrides.get('persistence', chain.enabled.get('persistence', False)):
@@ -8374,6 +8565,7 @@ def generate_nonlens_system_complete(mode, band_cfgs, rng, field_pop=None,
                     numpix=int(numpix),
                     seed_prnu=_prnu_seed_nl,
                     enabled=_det_overrides_nl if _det_overrides_nl else None,
+                    n_exposures=_n_exposures,
                 )
                 final_image = chain.apply(_image_plus_sky)
                 if _bg_level_b > 0:
@@ -8848,7 +9040,19 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
         try:
             _arc_only = field_info.get('arc_only_images') if field_info else None
             if _arc_only:
-                arc_rgb = create_jwst_rgb(_arc_only, bands=active_bands, telescope=_tel)
+                # FIX (user-reported, 2026-08-02): create_jwst_rgb's stretch
+                # derives its arcsinh softening scale from the image's own
+                # noise_sigma (via _rgb_composite_sky_subtract's MAD
+                # estimate) -- appropriate for real noisy data, but
+                # arc_only_images is a clean, noiseless model-only flux map
+                # (no sky, no detector noise), so noise_sigma collapses to
+                # ~0 and the softening scale goes with it. The result is an
+                # unrealistically harsh, near-binary stretch (a saturated
+                # core against a crushed-black background) instead of a
+                # smooth surface-brightness falloff. Use a percentile-based
+                # softening scale instead, appropriate for a smooth,
+                # noiseless flux map.
+                arc_rgb = _clean_flux_rgb(_arc_only, active_bands)
                 if arc_rgb is not None:
                     arc_dir = out_root / "jpg_rgb_arc_only"
                     arc_dir.mkdir(parents=True, exist_ok=True)
@@ -8955,6 +9159,13 @@ def save_outputs_unified(lens_id, images, out_root, row, n_lens_used, field_info
                                         if row.get('magnification_gate_max') is not None else None),
             'source_position_resampled_for_caustic': bool(row.get('source_position_resampled_for_caustic', False)),
             'source_mag_brightening_applied': bool(row.get('source_mag_brightening_applied', False)),
+            # Added 2026-08-02 (user-reported): needed to verify catalog
+            # geometry values are actually honored, and for the arc-extent/
+            # source-offset validation metrics.
+            'lens_radius': (float(row['lens_radius']) if row.get('lens_radius') is not None else None),
+            'source_radius': (float(row['source_radius']) if row.get('source_radius') is not None else None),
+            'source_x': (float(row['source_x']) if row.get('source_x') is not None else None),
+            'source_y': (float(row['source_y']) if row.get('source_y') is not None else None),
         }
 
         # Stellar-population summary from the FSPS SED upgrade (mass-weighted
@@ -9715,31 +9926,33 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
         epoch_match = re.search(r'epoch(\d+)', filename_base)
         epoch_index = int(epoch_match.group(1)) if epoch_match else None
         
-        # Create minimal row dict for unified save
-        # FIX (adversarial audit finding C-2, 2026-08-01): this used to drop
-        # every field except theta_E/redshifts, silently discarding
-        # theta_E_override_applied/theta_E_pre_override/lens_sigma_kms/
-        # shear_gamma1/shear_gamma2 even though row_data (the actual
-        # mutated row from simulate_complete_lens_system_with_real_fields)
-        # carried them correctly -- so the *value* of theta_E was fixed but
-        # the diagnostic override flag and kinematic labels were still
-        # lost at this specific call site.
-        row = {
-            'lens_id': lens_id,
-            'theta_E': row_data.get('theta_E', 0.0),
-            'lens_redshift': row_data.get('lens_redshift', 0.0),
-            'source_redshift': row_data.get('source_redshift', 0.0),
-            'theta_E_override_applied': row_data.get('theta_E_override_applied', False),
-            'theta_E_pre_override': row_data.get('theta_E_pre_override', None),
-            'lens_sigma_kms': row_data.get('lens_sigma_kms', None),
-            'shear_gamma1': row_data.get('shear_gamma1', None),
-            'shear_gamma2': row_data.get('shear_gamma2', None),
-            'magnification': row_data.get('magnification', None),
-            'magnification_gate_min': row_data.get('magnification_gate_min', None),
-            'magnification_gate_max': row_data.get('magnification_gate_max', None),
-            'source_position_resampled_for_caustic': row_data.get('source_position_resampled_for_caustic', False),
-            'source_mag_brightening_applied': row_data.get('source_mag_brightening_applied', False),
-        }
+        # Create row dict for unified save.
+        # FIX (adversarial audit finding C-2, 2026-08-01; recurred twice
+        # more on 2026-08-01/02 for FSPS fields and again for lens_radius/
+        # source_radius/source_x/source_y): this used to be a hand-picked
+        # allowlist of named fields, silently dropping anything not
+        # explicitly listed even though row_data (the actual mutated row
+        # from simulate_complete_lens_system_with_real_fields) carried it
+        # correctly -- three separate real bugs from the same root cause.
+        # Forward row_data wholesale instead, then only fill in defaults
+        # for keys that might be genuinely absent (e.g. a bare dict
+        # instead of a full pandas Series) -- this closes the whole class
+        # of bug rather than the one or two fields noticed so far.
+        row = dict(row_data) if hasattr(row_data, 'items') else {}
+        row['lens_id'] = lens_id
+        row.setdefault('theta_E', 0.0)
+        row.setdefault('lens_redshift', 0.0)
+        row.setdefault('source_redshift', 0.0)
+        row.setdefault('theta_E_override_applied', False)
+        row.setdefault('theta_E_pre_override', None)
+        row.setdefault('lens_sigma_kms', None)
+        row.setdefault('shear_gamma1', None)
+        row.setdefault('shear_gamma2', None)
+        row.setdefault('magnification', None)
+        row.setdefault('magnification_gate_min', None)
+        row.setdefault('magnification_gate_max', None)
+        row.setdefault('source_position_resampled_for_caustic', False)
+        row.setdefault('source_mag_brightening_applied', False)
         # FIX (2026-08-01): same class of bug as the theta_E fix above --
         # this minimal dict silently dropped the FSPS stellar-population
         # metadata (mass-weighted age/metallicity/age_method, 33-band SED,
@@ -9885,6 +10098,36 @@ def save_complete_outputs(filename_base, images, out_root, row_data, field_info,
         import traceback
         traceback.print_exc()
         return False
+
+
+def _clean_flux_rgb(images, bands, black_pct=1.0, vmax_pct=99.9, softening_frac=0.15):
+    """RGB stretch for a clean, noiseless model-only flux map (e.g.
+    arc_only_images) -- see the call site's comment for why
+    create_jwst_rgb's noise-derived stretch doesn't work here. Percentile-
+    based black level and arcsinh softening scale instead of a MAD-noise
+    estimate, so a smooth extended source stays smooth rather than
+    collapsing to a saturated core against crushed-black background."""
+    sorted_bands = sorted([b for b in bands if b in images],
+                           key=lambda b: BAND_CENTERS_UM.get(b.lower(), 0))
+    if len(sorted_bands) < 3:
+        return None
+    red = images[sorted_bands[-1]].astype(np.float64)
+    blue = images[sorted_bands[0]].astype(np.float64)
+    mid = sorted_bands[1:-1]
+    green = np.mean([images[b] for b in mid], axis=0).astype(np.float64) if mid else 0.5 * (red + blue)
+
+    def _stretch(im):
+        black = np.percentile(im, black_pct)
+        im_sub = np.clip(im - black, 0, None)
+        vmax = np.percentile(im_sub, vmax_pct)
+        if vmax <= 0:
+            vmax = im_sub.max() if im_sub.max() > 0 else 1.0
+        soft = max(vmax * softening_frac, 1e-12)
+        return np.clip(np.arcsinh(im_sub / soft) / np.arcsinh(vmax / soft), 0, 1)
+
+    rgb = np.stack([_stretch(red), _stretch(green), _stretch(blue)], axis=-1)
+    return np.clip(rgb, 0, 1)
+
 
 def create_jwst_rgb(images, bands=None, telescope=None, arc_images=None):
     """Create realistic RGB using astronomical normalization, tuned per telescope.
@@ -10739,11 +10982,31 @@ Example usage:
     
     try:
         print(f"Loading COSMOS structural catalog...")
-        base_catalog = read_combined_cosmos_catalogs(
-            str(struct_path),
-            str(analysis_path) if analysis_path else None
-        )
-        
+        # FIX (2026-08-02, user-reported): read_combined_cosmos_catalogs()
+        # reconstructs `conv` from scratch using column names specific to
+        # the RAW COSMOS-Web structural+analysis catalog format -- it does
+        # NOT pass through an already-final-schema CSV's own theta_E/
+        # source_x/source_y/source_radius/lens_radius/redshift values,
+        # silently replacing them with catalog-format-specific derivations
+        # or defaults instead. A catalog that already has the pipeline's
+        # own row schema (detected here by the presence of theta_E,
+        # source_x, and source_radius together -- the combination
+        # read_combined_cosmos_catalogs() itself only ever PRODUCES, never
+        # consumes) is loaded directly instead, so its values are actually
+        # honored downstream (together with strict_catalog.use_catalog_only
+        # to stop later pipeline stages from resampling them).
+        _prebuilt_probe = _read_csv_robust(str(struct_path))
+        _is_prebuilt_schema = {'theta_E', 'source_x', 'source_radius'}.issubset(_prebuilt_probe.columns)
+        if _is_prebuilt_schema:
+            print(f"  Detected pre-built final-schema catalog ({len(_prebuilt_probe)} rows) "
+                  f"-- loading directly, bypassing raw COSMOS-Web column reconstruction.")
+            base_catalog = normalize_cosmos_catalog(_prebuilt_probe)
+        else:
+            base_catalog = read_combined_cosmos_catalogs(
+                str(struct_path),
+                str(analysis_path) if analysis_path else None
+            )
+
         print(f"✓ Base catalog processed: {len(base_catalog):,} configurations")
 
         # Optional catalog-level selection for lens Sérsic index (student-project control)
@@ -10919,10 +11182,12 @@ Example usage:
         _tel_cfg_main = CONFIG.get('telescope_configs', {}).get(_active_telescope, {})
         _main_pixel_scale = float(_tel_cfg_main.get('pixel_scale', CONFIG.get('pixel_scale', 0.031)))
         _main_exp_time    = float(_tel_cfg_main.get('exposure_time', CONFIG.get('exposure_time', 1028.0)))
+        _main_n_exposures = int(_tel_cfg_main.get('n_exposures', CONFIG.get('n_exposures', 1)))
 
         # Override global pixel_scale for this run so band_cfgs pick it up
         CONFIG['pixel_scale'] = _main_pixel_scale
         CONFIG['exposure_time'] = _main_exp_time
+        CONFIG['n_exposures'] = _main_n_exposures
 
         # Override UPPER_BANDS for single non-JWST telescope mode
         if _active_telescope != 'jwst' and not multi_resolution_enabled:
@@ -11055,6 +11320,8 @@ Example usage:
                 CONFIG['pixel_scale'] = float(_res_tel_cfg.get('pixel_scale', pixel_scale))
                 CONFIG['exposure_time'] = float(_res_tel_cfg.get('exposure_time',
                                                 CONFIG.get('exposure_time', 1028.0)))
+                CONFIG['n_exposures'] = int(_res_tel_cfg.get('n_exposures',
+                                            CONFIG.get('n_exposures', 1)))
 
                 resolution_band_cfgs = create_jwst_band_configs(rng=rng, use_distribution=True)
                 
@@ -11343,6 +11610,8 @@ Example usage:
                 CONFIG['pixel_scale']    = float(_nl_tel_cfg.get('pixel_scale', pixel_scale))
                 CONFIG['exposure_time']  = float(_nl_tel_cfg.get('exposure_time',
                                                  CONFIG.get('exposure_time', 1028.0)))
+                CONFIG['n_exposures']    = int(_nl_tel_cfg.get('n_exposures',
+                                               CONFIG.get('n_exposures', 1)))
                 resolution_band_cfgs = create_jwst_band_configs(rng=rng, use_distribution=True)
 
                 # For multi-resolution: reset RNG to same state for each resolution
