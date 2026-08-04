@@ -29,7 +29,7 @@ python cosmos_web_lens_mock_v11_enhanced_morphology_full.py \
   --variations_per_base 25 --n_field_max 5 --add_artifacts
 """
 
-import os, sys, math, time, argparse, json, traceback, zlib
+import os, sys, math, time, argparse, json, traceback, zlib, hashlib
 import yaml
 from typing import Optional
 from pathlib import Path
@@ -1369,7 +1369,13 @@ def get_psf_for_simulation(psf_data, lens_id=None, rng=None, ra=None, dec=None, 
                 if EUCLID_Q1_AVAILABLE and euclid_q1_enabled(CONFIG):
                     cat = get_euclid_q1_catalog(CONFIG)
                     if cat is not None:
-                        tile = cat.assign_psf_tile(np.random.default_rng(rng.randint(0, 2**31)), lens_id=lens_id)
+                        # Derive the PSF-tile seed deterministically from lens_id
+                        # instead of drawing from the shared per-lens `rng`: consuming
+                        # a draw from that shared stream here (as before) desynchronizes
+                        # all subsequent lens/source parameter draws for Euclid relative
+                        # to every other telescope rendering the same lens row.
+                        _tile_seed = int(hashlib.md5(str(lens_id).encode()).hexdigest()[:8], 16) % (2**31)
+                        tile = cat.assign_psf_tile(np.random.default_rng(_tile_seed), lens_id=lens_id)
             except Exception:
                 pass
         if tile is None and lens_id is not None:
@@ -9521,10 +9527,23 @@ def read_combined_cosmos_catalogs(structural_path, analysis_path=None):
     conv = pd.DataFrame(index=range(base_len))
 
     # Telescope-specific lens-population overrides (e.g. Euclid Q1 statistics).
-    # Only applied when telescope == "euclid"; other telescopes use the
-    # global redshifts/mass/theta_E settings unchanged.
+    # Only applied when telescope == "euclid" AND euclid_q1.use_population_priors
+    # is not explicitly disabled; other telescopes -- and Euclid runs that
+    # opt out of population priors (e.g. "matched" configs meant to render
+    # the SAME physical system as the other telescopes) -- use the global
+    # redshifts/mass/theta_E settings unchanged.
+    # FIX (2026-08-04): this override used to key off `_telescope == 'euclid'`
+    # alone, ignoring `euclid_q1.use_population_priors`. That made Euclid
+    # generate a genuinely different base catalog (different lens_redshift/
+    # source_redshift/theta_E per row) than JWST/Roman/Subaru/LSST for the
+    # "matched" config even though that config sets
+    # use_population_priors: false specifically to avoid this divergence.
     _telescope = CONFIG.get('telescope', 'jwst').lower()
-    _lens_pop = CONFIG.get('telescope_configs', {}).get(_telescope, {}).get('lens_population', {})
+    _use_pop_priors = CONFIG.get('euclid_q1', {}).get('use_population_priors', True)
+    if _telescope == 'euclid' and _use_pop_priors:
+        _lens_pop = CONFIG.get('telescope_configs', {}).get(_telescope, {}).get('lens_population', {})
+    else:
+        _lens_pop = {}
 
     # Process redshifts with config-driven ranges
     z_cfg = {**CONFIG.get('redshifts', {}), **_lens_pop.get('redshifts', {})}
